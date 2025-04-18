@@ -1,8 +1,8 @@
-from detection import detection
+from detection import Detection
 
 def main():
     # Initialize the detection class with an image path and type
-    detector = detection(image_path="C:/Users/talsh/Downloads/example_01.png", type="image")
+    detector = Detection(image_path="C:/Users/talsh/Downloads/example_01.png", type="image")
     
     # Call the aruco_detect method with a specific marker dictionary
     result_frame = detector.aruco_detect(marker_dict="DICT_5X5_100")

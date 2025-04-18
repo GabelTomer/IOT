@@ -2,7 +2,7 @@ import cv2 as cv
 import numpy as np
 import sys 
 import imutils as im 
-class detection:
+class Detection:
     def __init__(self, image_path=None, video_path=None, type="image"):
         self.image_path = image_path
         self.video_path = video_path
