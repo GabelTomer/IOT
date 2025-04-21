@@ -4,8 +4,8 @@ import glob
 import cv2.aruco as aruco
 import numpy as np
 import time
-class camera:
-    def __init__(self, camera_id: str, camera_name: str, camera_type: str,charuco_rows: int = 7, charuco_cols: int = 5, square_length: float = 0.02, marker_length: float = 0.016, num_frames: int = 20, save_path: str = "camera_calib.yaml"):
+class Camera:
+    def __init__(self, camera_id: int = 0, camera_name: str = "robot", camera_type: str ="onboard",charuco_rows: int = 7, charuco_cols: int = 5, square_length: float = 0.02, marker_length: float = 0.016, num_frames: int = 20, save_path: str = "camera_calib.yaml"):
         
         self.camera_id = camera_id
         self.camera_name = camera_name
@@ -22,7 +22,7 @@ class camera:
         self.dist_coeffs = None
     def __repr__(self):
         return f"Camera(id={self.camera_id}, name={self.camera_name}, type={self.camera_type})"
-    def calibrate_camera(self, pattern_size: tuple, square_size: float):
+    def calibrate_camera(self):
         # ----------------------------
         # Setup Camera
         # ----------------------------
