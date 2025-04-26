@@ -57,7 +57,7 @@ class Detection:
             ids = ids.flatten()
             for (markerCorner, markerID) in zip(corners, ids):
                 # Extract the marker corners (which are always a list of 4 Numpy arrays)
-                corners = markerCorner[0]
+                corners = np.squeeze(markerCorner)
                 # Draw a bounding box around the detected marker
                 cv.polylines(image, [np.int32(corners)], True, (0, 255, 0), 2)
                 # Compute and draw the center (x, y)-coordinates for the marker
