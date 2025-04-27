@@ -1,2 +1,2 @@
-from .point import point
+from .point import Point
 from .camera import Camera
