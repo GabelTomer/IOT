@@ -51,7 +51,7 @@ def main():
     display_queue = queue.Queue(maxsize=10)
 
     camera = Camera()
-    #camera.calibrate_camera()
+    camera.calibrate_camera()
     detector = Detection(known_markers_path="/Users/dorlugasi/Desktop/טכניון/אביב 2025/IoT/Project/IOT/core/utils/known_markers.json")
     stop_event = threading.Event()
 
