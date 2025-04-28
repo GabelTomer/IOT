@@ -4,7 +4,7 @@ app = Flask(__name__)
 
 # Example robot position
 robot_position = {
-    "x": 0.5,
+    "x": 1.2,
     "y": 1.8,
     "z": -1.0
 }
