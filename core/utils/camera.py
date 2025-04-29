@@ -9,7 +9,7 @@ def generate_charuco_board(squaresX: int, squaresY: int, squareLength: float, ma
     # Create a Charuco board: 7x10 squares, 3 cm square size, 2.4 cm marker size
     board = cv2.aruco.CharucoBoard_create(squaresX, squaresY, squareLength, markerLength, dictionary)
     # Draw and save at higher resolution, landscape orientation
-    img = board.generateImage((1200, 850))
+    img = board.draw((1200, 850))
     cv2.imwrite("charuco_board.png", img)
     return board
 
