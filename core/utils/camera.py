@@ -36,6 +36,7 @@ class Camera:
         return f"Camera(id={self.camera_id}, name={self.camera_name}, type={self.camera_type})"
             
     def calibrate_camera(self):
+        calibrate_fail = False
         cap = cv2.VideoCapture(self.camera_id)
         if not cap.isOpened():
             print("[ERROR] Camera not found.")
@@ -81,7 +82,7 @@ class Camera:
         cv2.destroyAllWindows()
 
         print("Running calibration...")
-        ret, camera_matrix, dist_coeffs, rvecs, tvecs = aruco.calibrateCameraCharuco(
+        calibrate_fail, camera_matrix, dist_coeffs, rvecs, tvecs = aruco.calibrateCameraCharuco(
             charucoCorners=all_corners,
             charucoIds=all_ids,
             board=self.charuco_board,
@@ -89,6 +90,10 @@ class Camera:
             cameraMatrix=None,
             distCoeffs=None
         )
+        
+        if not calibrate_fail:
+            print("[WARNING] Calibration failed. Restarting calibration process.")
+            return 1
 
         print("Calibration done.")
         print("Camera matrix:\n", camera_matrix)
@@ -101,8 +106,8 @@ class Camera:
 
         self.camera_matrix = camera_matrix
         self.dist_coeffs = dist_coeffs
-        self.validate_camera()
         print(f"Saved calibration to {self.SAVE_PATH}")
+        self.validate_camera()
         
         
     def validate_camera(self, num_validation_frames=20):
@@ -178,9 +183,6 @@ class Camera:
         mean_error = (total_error / total_points) ** 0.5
         print("\nValidation done.")
         print(f"Average reprojection error: {mean_error:.4f} pixels.")
-
-        if mean_error < 0.5:
-            print("Calibration is GOOD ✅")
-        else:
-            print("Calibration is NOT GOOD ❌ — Consider recalibrating.")
+        
+        return mean_error
         

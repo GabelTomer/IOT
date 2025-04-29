@@ -58,16 +58,16 @@ class Detection:
 
     def aruco_detect(self, frame, marker_dict="DICT_4X4_50"):
         aruco_dict = cv.aruco.getPredefinedDictionary(self.ARUCO_DICT[marker_dict])
-        parameters = cv.aruco.DetectorParameters()
-        detector = cv.aruco.ArucoDetector(aruco_dict, parameters)
-
-        corners, ids, _ = detector.detectMarkers(frame)
+        parameters = cv.aruco.DetectorParameters_create()
+        gray = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
+        corners, ids, _ = cv.aruco.detectMarkers(gray,aruco_dict)
         foundMarkers = False
 
         if ids is not None and len(corners) > 0:
             ids = ids.flatten()
             found_2d = []
             found_3d = []
+            i = 0
             for markerCorner, markerID in zip(corners, ids):
                 corner_points = markerCorner[0]
                 cX = int(np.average(corner_points[:, 0]))
@@ -78,9 +78,10 @@ class Detection:
 
                 if str(markerID) in self.known_markers:
                     found_3d.append(self.known_markers[str(markerID)])
-                    found_2d.append([cX, cY])
+                    found_2d.append(np.int32(corners[i][0]))
                     foundMarkers = True
-
+                i += 1
+		
             if foundMarkers:
                 return np.array(found_2d, dtype=np.float32), np.array(found_3d, dtype=np.float32), frame
 
