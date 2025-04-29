@@ -7,7 +7,7 @@ def generate_charuco_board(squaresX: int, squaresY: int, squareLength: float, ma
     # Use a 5x5 dictionary (more IDs = more unique markers)
     dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_100)
     # Create a Charuco board: 7x10 squares, 3 cm square size, 2.4 cm marker size
-    board = cv2.aruco.CharucoBoard((squaresX, squaresY), squareLength, markerLength, dictionary)
+    board = cv2.aruco.CharucoBoard_create(squaresX, squaresY, squareLength, markerLength, dictionary)
     # Draw and save at higher resolution, landscape orientation
     img = board.generateImage((1200, 850))
     cv2.imwrite("charuco_board.png", img)
@@ -149,10 +149,8 @@ class Camera:
                         cv2.drawFrameAxes(frame, self.camera_matrix, self.dist_coeffs, rvec, tvec, 0.1)
 
                         # Project the 3D points to 2D
-                        self.charuco_board.getChessboardCorners
-                        obj_points = self.charuco_board.getChessboardCorners()[charuco_ids.flatten()]
+                        obj_points = np.array([self.charuco_board.chessboardCorners[i[0]] for i in charuco_ids], dtype=np.float32)                        
                         img_points, _ = cv2.projectPoints(obj_points, rvec, tvec, self.camera_matrix, self.dist_coeffs)
-
                         all_detected_corners.append(charuco_corners.reshape(-1, 2))
                         all_projected_corners.append(img_points.reshape(-1, 2))
                         
