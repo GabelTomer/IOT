@@ -1,19 +1,19 @@
 import cv2 as cv
 import numpy as np
-import sys 
-import imutils as im 
+import sys
+import imutils as im
 import json
 import os
+
 class Detection:
-    def __init__(self, image_path=None, video_path=None, type="image"):
-        self.image_path = image_path
-        self.video_path = video_path
-        self.type = type
-        print("[INFO] loading image...")
-        self.image = cv.imread(self.image_path)
-        self.image = im.resize(self.image, width=600)
+    def __init__(self, known_markers_path=None):
+        self.image_path = None
+        self.video_path = None
+        self.type = "video"
+        self.image = None
         self.found_markers_in_3d = {}
         self.found_markers_in_2d = {}
+        
         self.ARUCO_DICT = {
 	        "DICT_4X4_50": cv.aruco.DICT_4X4_50,
 	        "DICT_4X4_100": cv.aruco.DICT_4X4_100,
@@ -36,90 +36,53 @@ class Detection:
 	        "DICT_APRILTAG_25h9": cv.aruco.DICT_APRILTAG_25h9,
 	        "DICT_APRILTAG_36h10": cv.aruco.DICT_APRILTAG_36h10,
 	        "DICT_APRILTAG_36h11": cv.aruco.DICT_APRILTAG_36h11
-        }# dictionary of all available aruco markers
+        }
+
+        self.known_markers = self.load_known_markers(known_markers_path) if known_markers_path else {}
+
+    def load_known_markers(self, path):
+        with open(path, 'r') as file:
+            data = json.load(file)
         
-    def aruco_detect(self,marker_dict="DICT_4X4_50", fromImage=True, videoImage = None, known_markers=None):
-        # Load the dictionary that was used to generate the markers.
+        known_markers = {}
+        for k, v in data.items():
+            if isinstance(v, dict):
+                # Extract x, y, z from dict
+                known_markers[str(k)] = np.array([v["x"], v["y"], v["z"]], dtype=np.float32)
+            elif isinstance(v, list):
+                # Directly use the list
+                known_markers[str(k)] = np.array(v, dtype=np.float32)
+            else:
+                raise ValueError(f"[ERROR] Invalid marker format for marker {k}: {v}")
+        return known_markers
+
+    def aruco_detect(self, frame, marker_dict="DICT_4X4_50"):
         aruco_dict = cv.aruco.getPredefinedDictionary(self.ARUCO_DICT[marker_dict])
-        # Initialize the detector parameters using default values
-        parameters =  cv.aruco.DetectorParameters()
-        detector = cv.aruco.ArucoDetector(aruco_dict, parameters)
-        # Detect the markers in the image
-        if fromImage:
-            image = self.image
-        else:
-            image = videoImage
-        corners, ids, rejectedImgPoints = detector.detectMarkers(image)
-        # If at least one marker is detected
+        parameters = cv.aruco.DetectorParameters_create()
+        gray = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
+        corners, ids, _ = cv.aruco.detectMarkers(gray,aruco_dict)
         foundMarkers = False
-        if len(corners) > 0:
-            # Flatten the list of ids
+
+        if ids is not None and len(corners) > 0:
             ids = ids.flatten()
-            for (markerCorner, markerID) in zip(corners, ids):
-                # Extract the marker corners (which are always a list of 4 Numpy arrays)
-                corners = np.squeeze(markerCorner)
-                # Draw a bounding box around the detected marker
-                cv.polylines(image, [np.int32(corners)], True, (0, 255, 0), 2)
-                # Compute and draw the center (x, y)-coordinates for the marker
-                cX = int(np.average(corners[:, 0]))
-                cY = int(np.average(corners[:, 1]))
-                cv.circle(image, (cX, cY), 4, (0, 0, 255), -1)
-                # Draw the marker ID on the frame
-                cv.putText(image, str(markerID), (cX - 15, cY - 15), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2) 
-            print("[INFO] ArUco marker ID: {}".format(markerID))
-         
-            if known_markers is not None:
-                if not os.path.exists("aruco_markers.json"):
-                    with open("aruco_markers.json", 'w') as f:
-                        json.dump({}, f, indent=4)
-            
-                with open("aruco_markers.json", 'r+') as file:
-                    try:
-                        file_data = json.load(file)
-                    except json.JSONDecodeError:
-                        file_data = {}
+            found_2d = []
+            found_3d = []
+            i = 0
+            for markerCorner, markerID in zip(corners, ids):
+                corner_points = markerCorner[0]
+                cX = int(np.average(corner_points[:, 0]))
+                cY = int(np.average(corner_points[:, 1]))
+                cv.polylines(frame, [np.int32(corner_points)], True, (0, 255, 0), 2)
+                cv.putText(frame, str(markerID), (cX - 15, cY - 15),
+                           cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-                    if isinstance(file_data, dict):
-                        if not str(markerID) in file_data and str(markerID) in known_markers:
-                            file_data.update({str(markerID): known_markers[str(markerID)]}) 
-                            self.found_markers_in_3d[str(markerID)] = known_markers[str(markerID)]
-                            self.found_markers_in_2d[str(markerID)] = corners
-                            foundMarkers = True
-                    else:
-                        raise ValueError("JSON file must contain a list or dictionary at the root level")
+                if str(markerID) in self.known_markers:
+                    found_3d.append(self.known_markers[str(markerID)])
+                    found_2d.append(np.int32(corners[i][0]))
+                    foundMarkers = True
+                i+=1
+		
+            if foundMarkers:
+                return np.array(found_2d, dtype=np.float32), np.array(found_3d, dtype=np.float32), frame
 
-                    file.seek(0)
-                    json.dump(file_data, file, indent=4)
-
-               
-               
-               
-            
-        cv.imshow("Image", image)
-        if fromImage:
-            cv.waitKey(0)
-        return foundMarkers
-   
-    def aruco_detect_video(self, marker_dict="DICT_4X4_50", known_markers=None):
-        # Load the dictionary that was used to generate the markers.
-        
-        # Open the video file or capture device
-        video = cv.VideoCapture(0 if self.video_path is None else self.video_path)
-        if not video.isOpened():
-            print("Error: Could not open video.")
-            sys.exit(1)
-        numOfMarkers = 0
-        while True and numOfMarkers < 4:
-            # Read a frame from the video
-            ret, frame = video.read()
-            if not ret:
-                break
-            # Detect the markers in the frame
-            if self.aruco_detect(marker_dict, False, frame, known_markers=known_markers):
-                numOfMarkers += 1
-            	# if the `q` key was pressed, break from the loop
-            key = cv.waitKey(1) & 0xFF
-            if key == ord("q"):
-                break
-        video.release()
-        cv.destroyAllWindows()
+        return None, None, frame

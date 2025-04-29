@@ -1,11 +1,13 @@
 from flask import Flask, jsonify
+import threading
 class server:
     def __init__(self, port = 5000):
+        self.lock = threading.Lock()
         self.port = port
         self.position = {
-            'x': 0,
-            'y': 0,
-            'z': 0
+            'x': 0.0,
+            'y': 0.0,
+            'z': 0.0
         }
         self.app = Flask(__name__)
     
@@ -28,14 +30,21 @@ class server:
 
         @self.app.route('/get_position')
         def get_position():
+            print(f"this is jsonify {self.position} \n")
             # Example position data
-            return jsonify(self.position)
+            return jsonify(self.getPos())
     
-        def updatePosition(self, x, y, z):
+    def updatePosition(self, x, y, z):
+        with self.lock:
             self.position['x'] = x
             self.position['y'] = y
             self.position['z'] = z
+    def getPos(self):
+        with self.lock:
+            return self.position
+
 #for debug only use with out raspberry pi
+'''
 def main():
     # Initialize the server
     server_instance = server(port=5000)
@@ -48,3 +57,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+'''
