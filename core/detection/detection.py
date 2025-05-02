@@ -69,6 +69,7 @@ class Detection:
             ids = ids.flatten()
             found_2d = []
             found_3d = []
+            found_3d_centers = []
             for markerCorner, markerID in zip(corners, ids):
                 corner_points = markerCorner[0]
                 cX = int(np.average(corner_points[:, 0]))
@@ -89,6 +90,7 @@ class Detection:
                         [-half, -half, 0.0]
                     ], dtype=np.float32) + marker_center
                     found_3d.append(object_corners)
+                    found_3d_centers.append(marker_center)
                     found_2d.append(np.int32(corner_points))
                     foundMarkers = True
 		
@@ -97,7 +99,8 @@ class Detection:
                 # Ensure the arrays are in the correct format
                 twoDArray = np.array(found_2d, dtype=np.float32)
                 threeDArray = np.array(found_3d, dtype=np.float32)
-                return corners,twoDArray, threeDArray, frame
+                centersArray = np.array(found_3d_centers, dtype=np.float32)
+                return corners,twoDArray, threeDArray, centersArray, frame
 
         # If no markers are found, return None for arrays
-        return None,None, None, frame
+        return None,None, None, None, frame

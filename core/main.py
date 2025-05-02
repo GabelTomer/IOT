@@ -117,7 +117,7 @@ def main():
             if not ret:
                 break
             
-            corners, twoDArray, threeDArray, frame = detector.aruco_detect(frame=frame)
+            corners, twoDArray, threeDArray, threeDCenters, frame = detector.aruco_detect(frame=frame)
             
             
             if twoDArray is not None and threeDArray is not None:
@@ -134,8 +134,9 @@ def main():
                     R_cam2marker = R_marker2cam.T
                     t_cam2marker = -R_marker2cam.T @ t_marker2cam
                     R_cam2world = R_marker2world @ R_cam2marker
-                    t_cam2world = R_marker2world @ t_cam2marker + threeDArray[0].reshape(3, 1)
-                print(f"Camera Position: {t_cam2world}")
+                    print(threeDArray.shape)
+                    t_cam2world = R_marker2world @ t_cam2marker + threeDCenters.reshape(3, 1)
+                    print(f"Camera Position: {t_cam2world}")
                 #print(f"Camera Position: {t_cam2world.flatten()}")
                     flaskServer.updatePosition(t_cam2world[0][0], t_cam2world[1][0], t_cam2world[2][0])
                 
@@ -155,9 +156,10 @@ def main():
                         print(f"Position -> X: {position[0][0]:.2f}, Y: {position[1][0]:.2f}, Z: {position[2][0]:.2f}")
                 else:
                     print(f"[ERROR] Mismatch or not enough points: {len(twoDArray)} 2D points, {len(threeDArray)} 3D points")
+                cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
+    
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
-            cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 stop_event.set()  # <<<<<< Tell all threads to stop
