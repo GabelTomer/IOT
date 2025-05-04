@@ -7,15 +7,87 @@ from utils import Camera
 from detection import Detection
 import sys
 from server.flaskServer import server
+import random
+
+
 def runServer(flaskServer : server):
     
     flaskServer.setup_routes()
     flaskServer.run()
-     
 
+
+def generate_aruco_board():
+    # Constants
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+
+    dpi = 300
+    a4_width_px = 3508
+    a4_height_px = 2480
+    a4_width_m = 0.297  # 29.7 cm
+    a4_height_m = 0.21  # 21 cm
+    meters_to_pixels = a4_width_px / a4_width_m
+
+    marker_size_m = 0.06
+    marker_size_px = int(marker_size_m * meters_to_pixels)
+    min_spacing_m = 0.03  # relaxed spacing
+
+    canvas = 255 * np.ones((a4_height_px, a4_width_px), dtype=np.uint8)
+    marker_ids = [1, 2, 3, 4, 5]
+
+    # Safe placement function
+    def generate_safe_positions(num_markers, marker_size_m, min_spacing_m):
+        positions = [np.array([0.0, 0.0, 0.0])]  # ID 1 at center
+        attempts = 0
+        margin_x = (a4_width_m - marker_size_m) / 2 - 0.005
+        margin_y = (a4_height_m - marker_size_m) / 2 - 0.005
+
+        while len(positions) < num_markers:
+            candidate = np.array([
+                random.uniform(-margin_x, margin_x),
+                random.uniform(-margin_y, margin_y),
+                0.0
+            ])
+            if all(np.linalg.norm(candidate[:2] - p[:2]) >= (marker_size_m + min_spacing_m) for p in positions):
+                positions.append(candidate)
+            attempts += 1
+            if attempts > 5000:
+                print("⚠️ Warning: Too many placement attempts. Returning what was placed.")
+                break
+        return positions
+
+    # Generate safe marker positions
+    positions_list = generate_safe_positions(len(marker_ids), marker_size_m, min_spacing_m)
+    positions_m = {id: pos for id, pos in zip(marker_ids, positions_list)}
+
+    # Center point on canvas
+    center_px = (a4_width_px // 2, a4_height_px // 2)
+
+    # Draw all markers
+    for marker_id in marker_ids:
+        marker_img = cv2.aruco.drawMarker(aruco_dict, marker_id, marker_size_px)
+
+        x_m, y_m, _ = positions_m[marker_id]
+        x_px = int(center_px[0] + x_m * meters_to_pixels)
+        y_px = int(center_px[1] - y_m * meters_to_pixels)
+
+        top_left_x = x_px - marker_size_px // 2
+        top_left_y = y_px - marker_size_px // 2
+
+        if 0 <= top_left_x < a4_width_px - marker_size_px and 0 <= top_left_y < a4_height_px - marker_size_px:
+            canvas[top_left_y:top_left_y+marker_size_px, top_left_x:top_left_x+marker_size_px] = marker_img
+
+    # Save the PNG
+    cv2.imwrite("aruco_board_landscape.png", canvas)
+
+    # Print marker coordinates
+    print("✅ Marker coordinates (in meters):")
+    for marker_id in marker_ids:
+        x, y, z = positions_m[marker_id]
+        print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
 
 def main():
-    
+
+    #generate_aruco_board()
     recalibrate = False
     camera = Camera()
     while not recalibrate:
@@ -23,23 +95,15 @@ def main():
         if mean_error < 0.5:
             print("Calibration is GOOD ✅")
             recalibrate = True
-        elif mean_error == 1:
-            recalibrate = False
-        else:
-            answer = input("Calibration failed ❌. Do you want to retry? (Y/N): ").strip().lower()
-            if answer == 'y':
-                recalibrate = False  # meaning: run calibration again
-            else:
-                recalibrate = True   # meaning: stop recalibrating and continue
         
-    detector = Detection(known_markers_path="/home/admin/ArucoTracker/IOT/IOT-Dor-branch/core/utils/known_markers.json")
-    flaskServer = server(port = 5000)
-    stop_event = threading.Event()
+    detector = Detection(known_markers_path="/Users/dorlugasi/Desktop/טכניון/אביב 2025/IoT/Project/IOT/core/utils/known_markers.json")
+    #flaskServer = server(port = 5000)
+    #stop_event = threading.Event()
     
-    server_thread = threading.Thread(target=runServer, args=(flaskServer,))
+    #server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     
 
-    server_thread.start()
+    #server_thread.start()
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
@@ -52,22 +116,29 @@ def main():
                 break
             twoDArray, threeDArray, frame = detector.aruco_detect(frame = frame)
             cv2.imshow("Detection", frame)
-            if twoDArray is not None:
-                print(f"twoDArray:  {twoDArray}\n")
-                success, rvec, tvec = cv2.solvePnP(threeDArray[0], twoDArray[0][0], camera.camera_matrix, camera.dist_coeffs)
-                if success:
-                    R, _ = cv2.Rodrigues(rvec)
-                    position = -R.T @ tvec
-                    flaskServer.updatePosition(position[0], position[1], position[2])
+            
+            if twoDArray is not None and threeDArray is not None:
+                if len(twoDArray) >= 4 and len(threeDArray) >= 4 and len(twoDArray) == len(threeDArray):
+                    img_pts = twoDArray.reshape(-1, 2).astype(np.float32)
+                    obj_pts = threeDArray.reshape(-1, 3).astype(np.float32)
+                    success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
+                    if success:
+                        R, _ = cv2.Rodrigues(rvec)
+                        position = -R.T @ tvec
+                        print(f"Position -> X: {position[0][0]:.2f}, Y: {position[1][0]:.2f}, Z: {position[2][0]:.2f}")
+                else:
+                    print(f"[ERROR] Mismatch or not enough points: {len(twoDArray)} 2D points, {len(threeDArray)} 3D points")
+            else:
+                print("[ERROR] twoDArray or threeDArray is None!")
             
             if cv2.waitKey(1) & 0xFF == ord('q'):
-                stop_event.set()  # <<<<<< Tell all threads to stop
+                #stop_event.set()  # <<<<<< Tell all threads to stop
                 break
 
     cv2.destroyAllWindows()
 
     # Now wait for all threads to end
-    server_thread.join()
+    #server_thread.join()
 
 if __name__ == "__main__":
     main()
