@@ -21,7 +21,7 @@ def main():
     camera.calibrate_camera()
     input("Press Enter to continue...")
     detector = Detection(known_markers_path="core/utils/known_markers.json")
-    flaskServer = server(port = 5000)
+    flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json")
     stop_event = threading.Event()
     
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
@@ -42,7 +42,7 @@ def main():
        
 
         if twoDArray is not None and threeDArray is not None:
-            if twoDArray.shape[0] <= 2:
+            if twoDArray.shape[0] < 4:
                 rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
                 rvec = rvecs[0]
                 tvec = tvecs[0]

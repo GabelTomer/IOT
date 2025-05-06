@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
+import 'package:logger/logger.dart';
+import 'package:validator_regex/validator_regex.dart';
 
+final logger = Logger();
 void main() {
+  logger.i('Aruco Robot UI started');
   runApp(const ArucoApp());
 }
 
@@ -42,6 +46,13 @@ class _ConnectionPage extends State<ConnectionPage> {
         );
         return;
       }
+      if(Validator.ipAddress(ip) == false) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid IP Address')),
+        );
+        return;
+      }
+      logger.i("Connecting to robot at $ip with password $password");
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -110,18 +121,55 @@ class _RobotControl extends State<RobotControl> {
     super.initState();
     startFetchPosition();
   }
-
-  String robotPosition = "Unknown";
-
-  double robotX = 100;
-  double robotY = 100;
+  bool errorOccurred = true;
+  String error = "Connection error";
+  String robotPosition = "Fetching...";
+  double robotX = 0;
+  double robotY = 0;
   bool isConnected = false;
   int scaleFactor = 100;
-  void startFetchPosition(){
+  var knownMarkers = <String, Offset>{};
+  void startFetchPosition() async{
+    await fetchKnownMarkers();
     timer = Timer.periodic(const Duration(seconds: 1), (timer) async{
       await fetchRobotPosition();
     });
   }
+
+  Future<void> fetchKnownMarkers() async {
+    try {
+      final response = await http.get(
+        Uri.parse('http://${widget.ipAddress}:5000/get_known_markers'),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        setState(() {
+          for (var marker in data) {
+            knownMarkers[marker['id']] = Offset(marker['x'].toDouble(), marker['y'].toDouble());
+          }
+          logger.i("Known markers fetched successfully!");
+          isConnected = true;
+          errorOccurred = false;
+        });
+      } else {
+        setState(() {
+          error = "Error: ${response.statusCode}";
+          logger.e("Error: ${response.statusCode}");
+          isConnected = false;
+          errorOccurred = true;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        isConnected = false;
+        error = "Connection error";
+        logger.e("Connection error: $e");
+        errorOccurred = true;
+      });
+    }
+  }
+
+
   Future<void> fetchRobotPosition() async {
     try {
       final response = await http.get(
@@ -130,20 +178,26 @@ class _RobotControl extends State<RobotControl> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
-          robotPosition = "X: ${data['x']}, Y: ${data['y']}, Z: ${data['z']}";
+          robotPosition = "X: ${data['x'].toStringAsFixed(2)}, Y: ${data['y'].toStringAsFixed(2)}, Z: ${data['z'].toStringAsFixed(2)}";
           robotX = data['x'] * scaleFactor; // Scale for display
           robotY = data['y'] * scaleFactor; // Scale for display
           isConnected = true;
+          errorOccurred = false;
         });
       } else {
         setState(() {
-          robotPosition = "Error: ${response.statusCode}";
+          error = "Error: ${response.statusCode}";
+          logger.e("Error: ${response.statusCode}");
+          isConnected = false;
+          errorOccurred = true;
         });
       }
     } catch (e) {
       setState(() {
         isConnected = false;
-        robotPosition = "Connection error";
+        error = "Connection error";
+        logger.e("Connection error: $e");
+        errorOccurred = true;
       });
     }
   }
@@ -152,6 +206,38 @@ class _RobotControl extends State<RobotControl> {
   Widget build(BuildContext context) {
     double screenWidth = MediaQuery.of(context).size.width;
     double screenHeight = MediaQuery.of(context).size.height;
+    Size mapSize = Size(screenWidth * 0.8, screenHeight * 0.4);
+
+    Offset screenToWorld(Offset pos, Size mapSize) {
+      const double mapWidthMeters = 10.0;
+      const double mapHeightMeters = 10.0;
+
+      double x = (pos.dx / mapSize.width) * mapWidthMeters;
+      double y = (pos.dy / mapSize.height) * mapHeightMeters;
+
+      return Offset(x, y);
+    }
+
+    Future<void> sendTargetPosition(Offset target) async {
+      final url = 'http://${widget.ipAddress}:5000/update_position'; // replace with your endpoint
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'x': target.dx, 'y': target.dy}),
+      );
+      if (response.statusCode == 200) {
+        // Handle success
+        logger.i("Target position sent successfully!");
+      } else {
+        // Handle error
+        logger.e('Failed to send target position: ${response.statusCode}');
+      }
+    }
+
+    void handleMapTap(Offset tapPosition) {
+      final worldPos = screenToWorld(tapPosition, mapSize);
+      sendTargetPosition(worldPos);
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Robot ArUco UI')),
@@ -159,24 +245,34 @@ class _RobotControl extends State<RobotControl> {
         children: [
           // Status Indicator in the top-right corner
           Positioned(
-            top: 20,
-            right: 20,
+            top: 0,
+            left: 0,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: isConnected ? Colors.green : Colors.red,
-                borderRadius: BorderRadius.circular(8),
-              ),
               child: Text(
                 isConnected ? 'Connected' : 'Disconnected',
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: isConnected ? Colors.green : Colors.red,
                   fontWeight: FontWeight.bold,
                 ),
               ),
             ),
           ),
           // Main content in the center
+          Positioned(
+            top: 20,
+            left: 0,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Text(
+                error,
+                style: TextStyle(
+                  color: errorOccurred ? Colors.red : Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
           Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -187,11 +283,20 @@ class _RobotControl extends State<RobotControl> {
                   color: Colors.blue[50],
                   child: Stack(
                     children: [
-                      CustomPaint(
-                        size: Size(screenWidth * 0.8, screenHeight * 0.4),
-                        painter: GridPainter(),
-                      ),
-                      Positioned(
+                    GestureDetector(
+                      onTapDown: (TapDownDetails details) {
+                      final tapPosition = details.localPosition;
+                      handleMapTap(tapPosition);
+                      },
+                      child: Container(
+                        color: Colors.transparent, // Required to register taps
+                          child:  CustomPaint(
+                            size: mapSize,
+                            painter: GridPainter(),
+                          ),
+                        ),
+                    ),
+                    Positioned(
                         left: robotX,
                         top: robotY,
                         child: Icon(Icons.android, size: 30, color: Colors.green),
@@ -199,24 +304,47 @@ class _RobotControl extends State<RobotControl> {
                     ],
                   ),
                 ),
-                Text(
+                
+              ],
+            ),
+          ),
+          Positioned(
+            bottom: 60,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Text(
                   'Robot Position:',
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
-                const SizedBox(height: 20),
-                Text(
-                  robotPosition,
-                  style: Theme.of(context).textTheme.headlineSmall,
                 ),
-                const SizedBox(height: 40),
-              ],
+              )
             ),
+            
+          Positioned(
+            bottom: 20,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: Text(
+                    robotPosition,
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+              ),
+            ), 
           ),
         ],
       ),
     );
   }
 }
+
+
+
 
 class GridPainter extends CustomPainter {
   @override
