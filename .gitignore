@@ -1,2 +1,10 @@
 cvenv/Lib/site-packages/_distutils_hack/__init__.py
 /cvenv
+/application/aruco_ui/.dart_tool
+/application/aruco_ui/.idea
+/application/aruco_ui/android
+/application/aruco_ui/build
+/application/aruco_ui/ios
+/application/aruco_ui/linux
+/application/aruco_ui/macos
+/application/aruco_ui/windows
