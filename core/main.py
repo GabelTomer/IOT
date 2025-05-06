@@ -97,13 +97,12 @@ def main():
             recalibrate = True
         
     detector = Detection(known_markers_path="/Users/dorlugasi/Desktop/טכניון/אביב 2025/IoT/Project/IOT/core/utils/known_markers.json")
-    #flaskServer = server(port = 5000)
-    #stop_event = threading.Event()
+    flaskServer = server(port = 5000)
+    stop_event = threading.Event()
     
-    #server_thread = threading.Thread(target=runServer, args=(flaskServer,))
+    server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     
-
-    #server_thread.start()
+    server_thread.start()
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
@@ -114,6 +113,8 @@ def main():
             ret, frame = video.read()
             if not ret:
                 break
+            height, width = frame.shape[:2]
+            print(f"Actual frame resolution: {width} x {height}")
             twoDArray, threeDArray, frame = detector.aruco_detect(frame = frame)
             cv2.imshow("Detection", frame)
             
@@ -132,13 +133,13 @@ def main():
                 print("[ERROR] twoDArray or threeDArray is None!")
             
             if cv2.waitKey(1) & 0xFF == ord('q'):
-                #stop_event.set()  # <<<<<< Tell all threads to stop
+                stop_event.set()  # <<<<<< Tell all threads to stop
                 break
 
     cv2.destroyAllWindows()
 
-    # Now wait for all threads to end
-    #server_thread.join()
+    #Now wait for all threads to end
+    server_thread.join()
 
 if __name__ == "__main__":
     main()
