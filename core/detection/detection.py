@@ -59,8 +59,10 @@ class Detection:
     def aruco_detect(self, frame, marker_dict="DICT_4X4_50"):
         aruco_dict = cv.aruco.getPredefinedDictionary(self.ARUCO_DICT[marker_dict])
         parameters = cv.aruco.DetectorParameters_create()
-        gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-        corners, ids, _ = cv.aruco.detectMarkers(gray, aruco_dict)
+        parameters.cornerRefinementMethod = cv.aruco.CORNER_REFINE_SUBPIX
+        gray = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
+        corners, ids, _ = cv.aruco.detectMarkers(gray,aruco_dict,parameters=parameters)
+
         foundMarkers = False
 
         if ids is not None and len(corners) > 0:
@@ -76,9 +78,20 @@ class Detection:
                            cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
                 if str(markerID) in self.known_markers:
-                    found_3d.append(self.known_markers[str(markerID)])
-                    found_2d.append([cX, cY])  # Use the first corner for 2D points
+                    marker_center = self.known_markers[str(markerID)]
+                    marker_size = 0.06  # 6 cm marker
+                    half = marker_size / 2.0
+                    # Define corners in marker coordinate system and shift to global position
+                    object_corners = np.array([
+                        [-half,  half, 0.0],
+                        [ half,  half, 0.0],
+                        [ half, -half, 0.0],
+                        [-half, -half, 0.0]
+                    ], dtype=np.float32) + marker_center
+                    found_3d.append(object_corners)
+                    found_2d.append(np.int32(corner_points))
                     foundMarkers = True
+		
 
             if foundMarkers:
                 # Ensure the arrays are in the correct format
