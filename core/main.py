@@ -138,26 +138,19 @@ def main():
                     t_cam2world = R_marker2world @ t_cam2marker + threeDCenters.reshape(3, 1)
                     print(f"Camera Position: {t_cam2world}")
                 #print(f"Camera Position: {t_cam2world.flatten()}")
-                flaskServer.updatePosition(t_cam2world[0][0], t_cam2world[1][0], t_cam2world[2][0])
-                
-                
-                
-                
-                
-                
-            elif len(twoDArray) >= 4 and len(threeDArray) >= 4 and len(twoDArray) == len(threeDArray):
-                img_pts = twoDArray.reshape(-1, 2).astype(np.float32)
-                obj_pts = threeDArray.reshape(-1, 3).astype(np.float32)
-                success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
-                if success:
-                    R, _ = cv2.Rodrigues(rvec)
-                    position = -R.T @ tvec
-                    flaskServer.updatePosition(position[0][0], position[1][0], position[2][0])
-                    print(f"Position -> X: {position[0][0]:.2f}, Y: {position[1][0]:.2f}, Z: {position[2][0]:.2f}")
-                else:
-                    print(f"[ERROR] Mismatch or not enough points: {len(twoDArray)} 2D points, {len(threeDArray)} 3D points")
+                    flaskServer.updatePosition(t_cam2world[0][0], t_cam2world[1][0], t_cam2world[2][0])
+                elif len(twoDArray) >= 4 and len(threeDArray) >= 4 and len(twoDArray) == len(threeDArray):
+                    img_pts = twoDArray.reshape(-1, 2).astype(np.float32)
+                    obj_pts = threeDArray.reshape(-1, 3).astype(np.float32)
+                    success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
+                    if success:
+                        R, _ = cv2.Rodrigues(rvec)
+                        position = -R.T @ tvec
+                        flaskServer.updatePosition(position[0][0], position[1][0], position[2][0])
+                        print(f"Position -> X: {position[0][0]:.2f}, Y: {position[1][0]:.2f}, Z: {position[2][0]:.2f}")
+                    else:
+                        print(f"[ERROR] Mismatch or not enough points: {len(twoDArray)} 2D points, {len(threeDArray)} 3D points")
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
-    
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
             cv2.imshow("Detection", frame)

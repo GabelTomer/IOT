@@ -180,8 +180,8 @@ class _RobotControl extends State<RobotControl> {
         final data = json.decode(response.body);
         setState(() {
           robotPosition = "X: ${data['x'].toStringAsFixed(2)}, Y: ${data['y'].toStringAsFixed(2)}, Z: ${data['z'].toStringAsFixed(2)}";
-          robotX = data['x'] * scaleFactor; // Scale for display
-          robotY = data['y'] * scaleFactor; // Scale for display
+          robotX = data['x'] ; // Scale for display
+          robotY = data['y'] ; // Scale for display
           isConnected = true;
           errorOccurred = false;
         });
@@ -208,7 +208,8 @@ class _RobotControl extends State<RobotControl> {
     double screenWidth = MediaQuery.of(context).size.width;
     double screenHeight = MediaQuery.of(context).size.height;
     Size mapSize = Size(screenWidth * 0.8, screenHeight * 0.4);
-
+    double mapWidthMeters = 10.0; // Width of the map in meters
+    double mapHeightMeters = 10.0; // Height of the map in meters
     Offset screenToWorld(Offset pos, Size mapSize) {
       const double mapWidthMeters = 10.0;
       const double mapHeightMeters = 10.0;
@@ -299,14 +300,14 @@ class _RobotControl extends State<RobotControl> {
                     ),
                     for(var marker in knownMarkers.entries) 
                       Positioned(
-                        left: marker.value.dx ,
-                        top: marker.value.dy ,
+                        left: (marker.value.dx.floor() *( mapSize.width /mapWidthMeters).floor()).floorToDouble() ,
+                        top: (marker.value.dy.floor() * (mapSize.height / mapHeightMeters).floor()).floorToDouble() ,
                         child: Icon(Icons.location_on, size: 20, color: Colors.red),
                       ),
                       // Robot position
                     Positioned(
-                        left: robotX,
-                        top: robotY,
+                        left: (robotX.floor() * ( mapSize.width /mapWidthMeters).floor()).floorToDouble(),
+                        top: (robotY.floor() * (mapSize.height / mapHeightMeters).floor()).floorToDouble(),
                         child: Icon(Icons.android, size: 30, color: Colors.green),
                       ),
                     ],
