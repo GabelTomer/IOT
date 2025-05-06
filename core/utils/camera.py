@@ -12,7 +12,6 @@ import glob
 '''
 
 def generate_data_for_calibrate():
-
     camera = cv2.VideoCapture(0)
     ret, img = camera.read()
 
@@ -24,12 +23,13 @@ def generate_data_for_calibrate():
         ret, img = camera.read()
         cv2.imshow("img", img)
 
-        if cv2.waitKey(20) & 0xFF == ord('c'):
+        key = cv2.waitKey(10) & 0xFF
+        if key == ord('c'):
             cv2.imwrite(name, img)
             cv2.imshow("img", img)
             count += 1
-            if cv2.waitKey(0) & 0xFF == ord('q'):
-                break
+        elif key == ord('q'):
+            break
 
 def generate_charuco_board(squaresX: int = 14, squaresY: int = 10, squareLength: float = 0.04, markerLength: float = 0.032):
     # Use a high-capacity ArUco dictionary
@@ -64,7 +64,11 @@ class Camera:
         return f"Camera(id={self.camera_id}, name={self.camera_name}, type={self.camera_type})"
          
     def calibrate_camera(self):
-        generate_data_for_calibrate()
+        images_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aruco_data")
+        if not os.path.exists(images_folder) and any(fname.endswith(".jpg") for fname in os.listdir(images_folder)):
+            generate_data_for_calibrate()
+        else:
+            print("📂 Existing images detected — skipping calibration.")
         # === CONFIGURATION ===
         images_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aruco_data")
         aruco_dict = self.DICTIONARY
