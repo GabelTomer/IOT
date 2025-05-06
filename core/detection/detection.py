@@ -62,6 +62,7 @@ class Detection:
         parameters.cornerRefinementMethod = cv.aruco.CORNER_REFINE_SUBPIX
         gray = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
         corners, ids, _ = cv.aruco.detectMarkers(gray,aruco_dict,parameters=parameters)
+
         foundMarkers = False
 
         if ids is not None and len(corners) > 0:
@@ -91,7 +92,12 @@ class Detection:
                     found_2d.append(np.int32(corner_points))
                     foundMarkers = True
 		
-            if foundMarkers:
-                return np.array(found_2d, dtype=np.float32), np.array(found_3d, dtype=np.float32), frame
 
-        return None, None, frame
+            if foundMarkers:
+                # Ensure the arrays are in the correct format
+                twoDArray = np.array(found_2d, dtype=np.float32)
+                threeDArray = np.array(found_3d, dtype=np.float32)
+                return corners,twoDArray, threeDArray, frame
+
+        # If no markers are found, return None for arrays
+        return None,None, None, frame
