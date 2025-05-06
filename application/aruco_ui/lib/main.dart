@@ -139,14 +139,15 @@ class _RobotControl extends State<RobotControl> {
   Future<void> fetchKnownMarkers() async {
     try {
       final response = await http.get(
-        Uri.parse('http://${widget.ipAddress}:5000/get_known_markers'),
+        Uri.parse('http://${widget.ipAddress}:5000/get_Known_Markers'),
       );
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
-          for (var marker in data) {
-            knownMarkers[marker['id']] = Offset(marker['x'].toDouble(), marker['y'].toDouble());
-          }
+            data.forEach((markerId, value) 
+            {
+              knownMarkers[markerId] = Offset((value['x'] as num).toDouble(), (value['y'] as num).toDouble());
+            });
           logger.i("Known markers fetched successfully!");
           isConnected = true;
           errorOccurred = false;
@@ -296,6 +297,13 @@ class _RobotControl extends State<RobotControl> {
                           ),
                         ),
                     ),
+                    for(var marker in knownMarkers.entries) 
+                      Positioned(
+                        left: marker.value.dx ,
+                        top: marker.value.dy ,
+                        child: Icon(Icons.location_on, size: 20, color: Colors.red),
+                      ),
+                      // Robot position
                     Positioned(
                         left: robotX,
                         top: robotY,

@@ -64,7 +64,7 @@ class Camera:
         return f"Camera(id={self.camera_id}, name={self.camera_name}, type={self.camera_type})"
          
     def calibrate_camera(self):
-        #generate_data_for_calibrate()
+        generate_data_for_calibrate()
         # === CONFIGURATION ===
         images_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aruco_data")
         aruco_dict = self.DICTIONARY
