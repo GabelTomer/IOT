@@ -40,24 +40,22 @@ class _ConnectionPage extends State<ConnectionPage> {
     String ip = ipController.text;
     String password = passwordController.text;
     if (ip.isNotEmpty && password.isNotEmpty) {
-      if(password != this.password) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Incorrect Password')),
-        );
+      if (password != this.password) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Incorrect Password')));
         return;
       }
-      if(Validator.ipAddress(ip) == false) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid IP Address')),
-        );
+      if (Validator.ipAddress(ip) == false) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Invalid IP Address')));
         return;
       }
       logger.i("Connecting to robot at $ip with password $password");
       Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (context) => RobotControl(ipAddress: ip),
-        ),
+        MaterialPageRoute(builder: (context) => RobotControl(ipAddress: ip)),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -105,10 +103,7 @@ class _ConnectionPage extends State<ConnectionPage> {
 
 class RobotControl extends StatefulWidget {
   final String ipAddress;
-  const RobotControl({
-    super.key,
-    required this.ipAddress
-  });
+  const RobotControl({super.key, required this.ipAddress});
 
   @override
   State<RobotControl> createState() => _RobotControl();
@@ -121,17 +116,19 @@ class _RobotControl extends State<RobotControl> {
     super.initState();
     startFetchPosition();
   }
+
   bool errorOccurred = true;
   String error = "Connection error";
   String robotPosition = "Fetching...";
   double robotX = 0;
   double robotY = 0;
   bool isConnected = false;
-  int scaleFactor = 100;
+  final int robotIconSize = 30;
+  final int markerIconSize = 20;
   var knownMarkers = <String, Offset>{};
-  void startFetchPosition() async{
+  void startFetchPosition() async {
     await fetchKnownMarkers();
-    timer = Timer.periodic(const Duration(seconds: 1), (timer) async{
+    timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       await fetchRobotPosition();
     });
   }
@@ -144,10 +141,12 @@ class _RobotControl extends State<RobotControl> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
-            data.forEach((markerId, value) 
-            {
-              knownMarkers[markerId] = Offset((value['x'] as num).toDouble(), (value['y'] as num).toDouble());
-            });
+          data.forEach((markerId, value) {
+            knownMarkers[markerId] = Offset(
+              (value['x'] as num).toDouble(),
+              (value['y'] as num).toDouble(),
+            );
+          });
           logger.i("Known markers fetched successfully!");
           isConnected = true;
           errorOccurred = false;
@@ -170,7 +169,6 @@ class _RobotControl extends State<RobotControl> {
     }
   }
 
-
   Future<void> fetchRobotPosition() async {
     try {
       final response = await http.get(
@@ -179,9 +177,10 @@ class _RobotControl extends State<RobotControl> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
-          robotPosition = "X: ${data['x'].toStringAsFixed(2)}, Y: ${data['y'].toStringAsFixed(2)}, Z: ${data['z'].toStringAsFixed(2)}";
-          robotX = data['x'] ; // Scale for display
-          robotY = data['y'] ; // Scale for display
+          robotPosition =
+              "X: ${data['x'].toStringAsFixed(2)}, Y: ${data['y'].toStringAsFixed(2)}, Z: ${data['z'].toStringAsFixed(2)}";
+          robotX = data['x']; // Scale for display
+          robotY = data['y']; // Scale for display
           isConnected = true;
           errorOccurred = false;
         });
@@ -208,8 +207,10 @@ class _RobotControl extends State<RobotControl> {
     double screenWidth = MediaQuery.of(context).size.width;
     double screenHeight = MediaQuery.of(context).size.height;
     Size mapSize = Size(screenWidth * 0.8, screenHeight * 0.4);
-    double mapWidthMeters = 10.0; // Width of the map in meters
-    double mapHeightMeters = 10.0; // Height of the map in meters
+    final double mapWidthMeters = 10.0; // Width of the map in meters
+    final double mapHeightMeters = 10.0; // Height of the map in meters
+    double xScaleFactor = (mapSize.width / mapWidthMeters).floorToDouble();
+    double yScaleFactor = (mapSize.height / mapHeightMeters).floorToDouble();
     Offset screenToWorld(Offset pos, Size mapSize) {
       const double mapWidthMeters = 10.0;
       const double mapHeightMeters = 10.0;
@@ -221,7 +222,8 @@ class _RobotControl extends State<RobotControl> {
     }
 
     Future<void> sendTargetPosition(Offset target) async {
-      final url = 'http://${widget.ipAddress}:5000/update_position'; // replace with your endpoint
+      final url =
+          'http://${widget.ipAddress}:5000/update_position'; // replace with your endpoint
       final response = await http.post(
         Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
@@ -285,35 +287,71 @@ class _RobotControl extends State<RobotControl> {
                   color: Colors.blue[50],
                   child: Stack(
                     children: [
-                    GestureDetector(
-                      onTapDown: (TapDownDetails details) {
-                      final tapPosition = details.localPosition;
-                      handleMapTap(tapPosition);
-                      },
-                      child: Container(
-                        color: Colors.transparent, // Required to register taps
-                          child:  CustomPaint(
+                      GestureDetector(
+                        onTapDown: (TapDownDetails details) {
+                          final tapPosition = details.localPosition;
+                          handleMapTap(tapPosition);
+                        },
+                        child: Container(
+                          color:
+                              Colors.transparent, // Required to register taps
+                          child: CustomPaint(
                             size: mapSize,
                             painter: GridPainter(),
                           ),
                         ),
-                    ),
-                    for(var marker in knownMarkers.entries) 
-                      Positioned(
-                        left: (marker.value.dx.floor() *( mapSize.width /mapWidthMeters).floor()).floorToDouble() ,
-                        top: (marker.value.dy.floor() * (mapSize.height / mapHeightMeters).floor()).floorToDouble() ,
-                        child: Icon(Icons.location_on, size: 20, color: Colors.red),
                       ),
+                      for (var marker in knownMarkers.entries)
+                        Positioned(
+                          left:
+                              worldToScreen(
+                                marker.value,
+                                mapSize,
+                                mapWidthMeters,
+                                mapHeightMeters,
+                              ).dx -
+                              10,
+                          top:
+                              worldToScreen(
+                                marker.value,
+                                mapSize,
+                                mapWidthMeters,
+                                mapHeightMeters,
+                              ).dy - markerIconSize
+                              ,
+                          child: Icon(
+                            Icons.location_on,
+                            size: markerIconSize.toDouble(),
+                            color: Colors.red,
+                          ),
+                        ),
+
                       // Robot position
-                    Positioned(
-                        left: (robotX.floor() * ( mapSize.width /mapWidthMeters).floor()).floorToDouble(),
-                        top: (robotY.floor() * (mapSize.height / mapHeightMeters).floor()).floorToDouble(),
-                        child: Icon(Icons.android, size: 30, color: Colors.green),
+                      Positioned(
+                        left:
+                            worldToScreen(
+                              Offset(robotX, robotY),
+                              mapSize,
+                              mapWidthMeters,
+                              mapHeightMeters,
+                            ).dx,
+                        top:
+                            worldToScreen(
+                              Offset(robotX, robotY),
+                              mapSize,
+                              mapWidthMeters,
+                              mapHeightMeters,
+                            ).dy -
+                            robotIconSize,
+                        child: Icon(
+                          Icons.android,
+                          size: robotIconSize.toDouble(),
+                          color: Colors.green,
+                        ),
                       ),
                     ],
                   ),
                 ),
-                
               ],
             ),
           ),
@@ -323,28 +361,34 @@ class _RobotControl extends State<RobotControl> {
             right: 0,
             child: Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 child: Text(
                   'Robot Position:',
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
-                ),
-              )
+              ),
             ),
-            
+          ),
+
           Positioned(
             bottom: 20,
             left: 0,
             right: 0,
             child: Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  child: Text(
-                    robotPosition,
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                child: Text(
+                  robotPosition,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
               ),
-            ), 
+            ),
           ),
         ],
       ),
@@ -352,10 +396,28 @@ class _RobotControl extends State<RobotControl> {
   }
 }
 
+Offset worldToScreen(
+  Offset world,
+  Size mapSize,
+  double mapWidthMeters,
+  double mapHeightMeters,
+) {
+  double x = (world.dx.floor() / mapWidthMeters.floor()) * mapSize.width;
+  double y =
+      mapSize.height.floor() -
+      (world.dy.floor() / mapHeightMeters.floor()) *
+          mapSize.height; // Flip Y axis
 
+  // Make sure x and y are within the bounds of the map
+  x = x.clamp(0.0, mapSize.width);
+  y = y.clamp(0.0, mapSize.height);
 
+  return Offset(x.floorToDouble(), y.floorToDouble());
+}
 
 class GridPainter extends CustomPainter {
+  final int gridSize = 10;
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint =
@@ -363,16 +425,28 @@ class GridPainter extends CustomPainter {
           ..color = Colors.grey
           ..strokeWidth = 1;
 
-    double step = size.width / 10; // 10x10 grid
+    double stepX = size.width / gridSize;
+    double stepY = size.height / gridSize;
 
-    for (double x = 0; x <= size.width; x += step) {
+    // Vertical lines (X axis)
+    for (double x = 0; x <= size.width; x += stepX) {
       canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
     }
-    for (double y = 0; y <= size.height; y += step) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+
+    // Horizontal lines (Y axis) - flip Y so 0,0 is at bottom-left
+    for (double y = 0; y <= size.height; y += stepY) {
+      double flippedY = size.height - y;
+      canvas.drawLine(Offset(0, flippedY), Offset(size.width, flippedY), paint);
     }
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
+
+
+
+
+
+
+
