@@ -6,7 +6,7 @@ app = Flask(__name__)
 def index():
     return '''
         <form action="/send" method="post">
-            <input type="text" name="message" placeholder="Enter command or data">
+            <input type="text" name="message" placeholder="Enter message">
             <input type="submit" value="Send">
         </form>
     '''
@@ -18,10 +18,10 @@ def handle_data():
     return f"Message received: {message}"
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=4000)
 
 
 # ------ TEST NOTES ------
-# Open browser and go to: http://<raspberry-pi-ip>:5000
+# Open browser and go to: http://<raspberry-pi-ip>:4000
 # Enter a message & then submit the form.
 # The message should be printed in the Raspberry Pi's terminal.
