@@ -35,6 +35,7 @@ class _ConnectionPage extends State<ConnectionPage> {
   final String password = "aruco";
   final TextEditingController ipController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
+   @override
 
   void ConnectToRobot() {
     String ip = ipController.text;
@@ -53,6 +54,7 @@ class _ConnectionPage extends State<ConnectionPage> {
         return;
       }
       logger.i("Connecting to robot at $ip with password $password");
+      passwordController.clear();
       Navigator.push(
         context,
         MaterialPageRoute(builder: (context) => RobotControl(ipAddress: ip)),
@@ -109,6 +111,24 @@ class RobotControl extends StatefulWidget {
   State<RobotControl> createState() => _RobotControl();
 }
 
+class Marker {
+  final String id;
+  Offset position;
+  double z;
+  Marker({required this.id, required this.position, required this.z});
+  Map<String, dynamic> toJson() {
+    return {'id': id, 'x': position.dx, 'y': position.dy, 'z': z};
+  }
+
+  factory Marker.fromJson(Map<String, dynamic> json) {
+    return Marker(
+      id: json['id'],
+      position: Offset(json['x'], json['y']),
+      z: json['z'],
+    );
+  }
+}
+
 class _RobotControl extends State<RobotControl> {
   Timer? timer;
   @override
@@ -117,15 +137,23 @@ class _RobotControl extends State<RobotControl> {
     startFetchPosition();
   }
 
+  @override
+  void dispose() {
+    timer?.cancel();
+    knownMarkers.clear();
+    super.dispose();
+  }
+
   bool errorOccurred = true;
   String error = "Connection error";
   String robotPosition = "Fetching...";
   double robotX = 0;
   double robotY = 0;
   bool isConnected = false;
+  int lastKnownMarkerId = 0;
   final int robotIconSize = 30;
   final int markerIconSize = 20;
-  var knownMarkers = <String, Offset>{};
+  var knownMarkers = <String, Marker>{};
   void startFetchPosition() async {
     await fetchKnownMarkers();
     timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
@@ -140,32 +168,45 @@ class _RobotControl extends State<RobotControl> {
       );
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        setState(() {
-          data.forEach((markerId, value) {
-            knownMarkers[markerId] = Offset(
-              (value['x'] as num).toDouble(),
-              (value['y'] as num).toDouble(),
-            );
+        if (mounted) {
+          setState(() {
+            data.forEach((markerId, value) {
+              knownMarkers[markerId] = Marker(
+                id: markerId,
+                position: Offset(
+                  (value['x'] as num).toDouble(),
+                  (value['y'] as num).toDouble(),
+                ),
+                z: (value['z'] as num).toDouble(),
+              );
+              if (int.parse(markerId) > lastKnownMarkerId) {
+                lastKnownMarkerId = int.parse(markerId);
+              }
+            });
+            logger.i("Known markers fetched successfully!");
+            isConnected = true;
+            errorOccurred = false;
           });
-          logger.i("Known markers fetched successfully!");
-          isConnected = true;
-          errorOccurred = false;
-        });
+        }
       } else {
+        if (mounted) {
+          setState(() {
+            error = "Error: ${response.statusCode}";
+            logger.e("Error: ${response.statusCode}");
+            isConnected = false;
+            errorOccurred = true;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
         setState(() {
-          error = "Error: ${response.statusCode}";
-          logger.e("Error: ${response.statusCode}");
           isConnected = false;
+          error = "Connection error";
+          logger.e("Connection error: $e");
           errorOccurred = true;
         });
       }
-    } catch (e) {
-      setState(() {
-        isConnected = false;
-        error = "Connection error";
-        logger.e("Connection error: $e");
-        errorOccurred = true;
-      });
     }
   }
 
@@ -176,29 +217,78 @@ class _RobotControl extends State<RobotControl> {
       );
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        setState(() {
-          robotPosition =
-              "X: ${data['x'].toStringAsFixed(2)}, Y: ${data['y'].toStringAsFixed(2)}, Z: ${data['z'].toStringAsFixed(2)}";
-          robotX = data['x']; // Scale for display
-          robotY = data['y']; // Scale for display
-          isConnected = true;
-          errorOccurred = false;
-        });
+        if (mounted) {
+          setState(() {
+            robotPosition =
+                "X: ${data['x'].toStringAsFixed(2)}, Y: ${data['y'].toStringAsFixed(2)}, Z: ${data['z'].toStringAsFixed(2)}";
+            robotX = data['x']; // Scale for display
+            robotY = data['y']; // Scale for display
+            isConnected = true;
+            errorOccurred = false;
+          });
+        }
       } else {
+        if (mounted) {
+          setState(() {
+            error = "Error: ${response.statusCode}";
+            logger.e("Error: ${response.statusCode}");
+            isConnected = false;
+            errorOccurred = true;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
         setState(() {
-          error = "Error: ${response.statusCode}";
-          logger.e("Error: ${response.statusCode}");
           isConnected = false;
+          error = "Connection error";
+          logger.e("Connection error: $e");
           errorOccurred = true;
         });
       }
-    } catch (e) {
-      setState(() {
-        isConnected = false;
-        error = "Connection error";
-        logger.e("Connection error: $e");
-        errorOccurred = true;
-      });
+    }
+  }
+
+  Future<void> addMarker(String id, Offset pos, double z) async {
+    final url = 'http://${widget.ipAddress}:5000/add_marker';
+    final response = await http.post(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'id': id, 'x': pos.dx, 'y': pos.dy, 'z': z}),
+    );
+    if (response.statusCode == 200) {
+      logger.i("Marker $id added successfully");
+    } else {
+      logger.e("Failed to add marker: ${response.statusCode}");
+    }
+  }
+
+  Future<void> updateMarker(String id, Offset pos, double z) async {
+    final url = 'http://${widget.ipAddress}:5000/update_marker';
+    final response = await http.post(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'id': id, 'x': pos.dx, 'y': pos.dy, 'z': z}),
+    );
+    if (response.statusCode == 200) {
+      logger.i("Marker $id updated successfully");
+    } else {
+      logger.e("Failed to update marker: ${response.statusCode}");
+    }
+  }
+
+  Future<void> deleteMarker(String id) async {
+    final url = 'http://${widget.ipAddress}:5000/delete_marker';
+    final response = await http.post(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'id': id}),
+    );
+    if (response.statusCode == 200) {
+      logger.i("Marker $id deleted");
+      knownMarkers.remove(id);
+    } else {
+      logger.e("Failed to delete marker: ${response.statusCode}");
     }
   }
 
@@ -211,14 +301,171 @@ class _RobotControl extends State<RobotControl> {
     final double mapHeightMeters = 10.0; // Height of the map in meters
     double xScaleFactor = (mapSize.width / mapWidthMeters).floorToDouble();
     double yScaleFactor = (mapSize.height / mapHeightMeters).floorToDouble();
+    final double MAX_MARKER_ID = 256; // Maximum marker ID
     Offset screenToWorld(Offset pos, Size mapSize) {
       const double mapWidthMeters = 10.0;
       const double mapHeightMeters = 10.0;
 
       double x = (pos.dx / mapSize.width) * mapWidthMeters;
-      double y = (pos.dy / mapSize.height) * mapHeightMeters;
+      double y = ((mapSize.height - pos.dy) / mapSize.height) * mapHeightMeters;
 
       return Offset(x, y);
+    }
+
+    void showEditMarkerDialog(
+      BuildContext context,
+      String markerId,
+      Offset pos,
+      double z,
+    ) {
+      final xController = TextEditingController(
+        text: pos.dx.toStringAsFixed(2),
+      );
+      final yController = TextEditingController(
+        text: pos.dy.toStringAsFixed(2),
+      );
+      final zController = TextEditingController(text: z.toStringAsFixed(2));
+
+      showDialog(
+        context: context,
+        builder:
+            (context) => AlertDialog(
+              title: Text('Edit Marker $markerId'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: xController,
+                    decoration: const InputDecoration(labelText: 'X'),
+                  ),
+                  TextField(
+                    controller: yController,
+                    decoration: const InputDecoration(labelText: 'Y'),
+                  ),
+                  TextField(
+                    controller: zController,
+                    decoration: const InputDecoration(labelText: 'Z'),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    await deleteMarker(markerId);
+                    Navigator.pop(context);
+                    fetchKnownMarkers();
+                  },
+                  child: const Text(
+                    'Delete',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final x = double.tryParse(xController.text);
+                    final y = double.tryParse(yController.text);
+                    final z = double.tryParse(zController.text);
+                    if (x != null && y != null && z != null) {
+                      await updateMarker(markerId, Offset(x, y), z);
+                      if (mounted) {
+                        Navigator.pop(context);
+                        fetchKnownMarkers();
+                      }
+                    }
+                  },
+                  child: const Text('Update'),
+                ),
+              ],
+            ),
+      );
+    }
+
+    void showAddMarkerDialog(BuildContext context, Offset initialPos) {
+      final idController = TextEditingController(
+        text: (lastKnownMarkerId + 1).toString(),
+      );
+      final xController = TextEditingController(
+        text: initialPos.dx.toStringAsFixed(2),
+      );
+      final yController = TextEditingController(
+        text: initialPos.dy.toStringAsFixed(2),
+      );
+      final zController = TextEditingController(text: "0.0");
+
+      showDialog(
+        context: context,
+        builder:
+            (context) => AlertDialog(
+              title: const Text('Add Marker'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: idController,
+                    decoration: const InputDecoration(labelText: 'Marker ID'),
+                  ),
+                  TextField(
+                    controller: xController,
+                    decoration: const InputDecoration(labelText: 'X'),
+                  ),
+                  TextField(
+                    controller: yController,
+                    decoration: const InputDecoration(labelText: 'Y'),
+                  ),
+                  TextField(
+                    controller: zController,
+                    decoration: const InputDecoration(labelText: 'Z'),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final id = idController.text.trim();
+                    final x = double.tryParse(xController.text);
+                    final y = double.tryParse(yController.text);
+                    final z = double.tryParse(zController.text);
+                    if (id.isNotEmpty && knownMarkers.containsKey(id)) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Marker ID already exists'),
+                        ),
+                      );
+                      return;
+                    }
+
+                     if (id.isNotEmpty && double.parse(id) > MAX_MARKER_ID) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Marker ID exceeds maximum value, Invalid ID'),
+                        ),
+                      );
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Marker ID already exists'),
+                        ),
+                      );
+                      return;
+                    }
+                    if (id.isNotEmpty && x != null && y != null && z != null) {
+                      await addMarker(id, Offset(x, y), z);
+                      Navigator.pop(context);
+                      fetchKnownMarkers(); // Refresh
+                    }
+                  },
+                  child: const Text('Add'),
+                ),
+              ],
+            ),
+      );
     }
 
     Future<void> sendTargetPosition(Offset target) async {
@@ -292,6 +539,11 @@ class _RobotControl extends State<RobotControl> {
                           final tapPosition = details.localPosition;
                           handleMapTap(tapPosition);
                         },
+                        onLongPressStart: (LongPressStartDetails details) {
+                          final tapPosition = details.localPosition;
+                          final worldPos = screenToWorld(tapPosition, mapSize);
+                          showAddMarkerDialog(context, worldPos);
+                        },
                         child: Container(
                           color:
                               Colors.transparent, // Required to register taps
@@ -305,7 +557,7 @@ class _RobotControl extends State<RobotControl> {
                         Positioned(
                           left:
                               worldToScreen(
-                                marker.value,
+                                marker.value.position,
                                 mapSize,
                                 mapWidthMeters,
                                 mapHeightMeters,
@@ -313,16 +565,25 @@ class _RobotControl extends State<RobotControl> {
                               10,
                           top:
                               worldToScreen(
-                                marker.value,
+                                marker.value.position,
                                 mapSize,
                                 mapWidthMeters,
                                 mapHeightMeters,
-                              ).dy - markerIconSize
-                              ,
-                          child: Icon(
-                            Icons.location_on,
-                            size: markerIconSize.toDouble(),
-                            color: Colors.red,
+                              ).dy -
+                              markerIconSize,
+                          child: GestureDetector(
+                            onTap:
+                                () => showEditMarkerDialog(
+                                  context,
+                                  marker.key,
+                                  marker.value.position,
+                                  marker.value.z,
+                                ),
+                            child: Icon(
+                              Icons.location_on,
+                              size: markerIconSize.toDouble(),
+                              color: Colors.red,
+                            ),
                           ),
                         ),
 
@@ -443,10 +704,3 @@ class GridPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
-
-
-
-
-
-
-

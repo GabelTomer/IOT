@@ -13,7 +13,7 @@ class Detection:
         self.image = None
         self.found_markers_in_3d = {}
         self.found_markers_in_2d = {}
-        
+        self.known_markers_path = known_markers_path
         self.ARUCO_DICT = {
 	        "DICT_4X4_50": cv.aruco.DICT_4X4_50,
 	        "DICT_4X4_100": cv.aruco.DICT_4X4_100,
@@ -39,7 +39,10 @@ class Detection:
         }
 
         self.known_markers = self.load_known_markers(known_markers_path) if known_markers_path else {}
-
+    
+    def update_known_markers(self):
+        self.known_markers = self.load_known_markers(self.known_markers_path)
+    
     def load_known_markers(self, path):
         with open(path, 'r') as file:
             data = json.load(file)
