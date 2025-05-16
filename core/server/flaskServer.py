@@ -42,13 +42,13 @@ class server:
             return jsonify(self.known_markers)
         
         
-        @self.app.route('/update_position', methods=['POST'])
+        @self.app.route('/update_position', methods=['POST']) #gets input from application on where to move
         def update_position():
             # Example data to update position
             data = request.get_json()
             if 'x' in data and 'y' in data:
                 print(f"this is data {data} \n")
-                return jsonify({'status': 'success', 'position': data})
+                return jsonify({'status': 'success', 'position': data}) #dont change returns from this function
             return jsonify({'status': 'error', 'message': 'Invalid data'}), 400
         
         

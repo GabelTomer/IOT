@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:logger/logger.dart';
 import 'package:validator_regex/validator_regex.dart';
+import 'package:flutter_joystick/flutter_joystick.dart';
 
 final logger = Logger();
 void main() {
@@ -35,8 +36,7 @@ class _ConnectionPage extends State<ConnectionPage> {
   final String password = "aruco";
   final TextEditingController ipController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
-   @override
-
+  @override
   void ConnectToRobot() {
     String ip = ipController.text;
     String password = passwordController.text;
@@ -154,6 +154,30 @@ class _RobotControl extends State<RobotControl> {
   final int robotIconSize = 30;
   final int markerIconSize = 20;
   var knownMarkers = <String, Marker>{};
+  DateTime _lastSent = DateTime.now();
+  bool pressed = false;
+  // Adjust based on your robot's IP
+  final String robotIP = "192.168.1.104";
+  
+  // Send joystick data, throttle to every 100ms
+  void sendJoystickCommand(double x, double y) async {
+    final now = DateTime.now();
+    if (now.difference(_lastSent).inMilliseconds < 100) return;
+    _lastSent = now;
+
+    // Normalize x and y to -100..100
+    int normX = (x * 100).toInt();
+    int normY = (y * 100).toInt();
+
+    final uri = Uri.parse('http://$robotIP/joystick?x=$normX&y=$normY');
+
+    try {
+      await http.get(uri);
+    } catch (e) {
+      print("Error sending joystick data: $e");
+    }
+  }
+
   void startFetchPosition() async {
     await fetchKnownMarkers();
     timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
@@ -442,10 +466,12 @@ class _RobotControl extends State<RobotControl> {
                       return;
                     }
 
-                     if (id.isNotEmpty && double.parse(id) > MAX_MARKER_ID) {
+                    if (id.isNotEmpty && double.parse(id) > MAX_MARKER_ID) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('Marker ID exceeds maximum value, Invalid ID'),
+                          content: Text(
+                            'Marker ID exceeds maximum value, Invalid ID',
+                          ),
                         ),
                       );
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -524,10 +550,13 @@ class _RobotControl extends State<RobotControl> {
               ),
             ),
           ),
+      
           Center(
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.start,
               children: [
+                SizedBox(height: 80),
                 Container(
                   width: screenWidth * 0.8,
                   height: screenHeight * 0.4,
@@ -613,44 +642,62 @@ class _RobotControl extends State<RobotControl> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 10),
+              if (pressed) ...[
+           Text(
+                    'Robot Position:',
+                    style: Theme.of(context).textTheme.headlineMedium,
+                  ),
+            const SizedBox(height: 10),
+
+          Text(
+                    robotPosition,
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+            const SizedBox(height: 10),
+
+           Joystick(
+                  mode: JoystickMode.all,
+                  listener: (details) {
+                    sendJoystickCommand(details.x, details.y);
+                  },
+                ),
+  
+
+          ] else ...[
+             Text(
+                    'Robot Position:',
+                    style: Theme.of(context).textTheme.headlineMedium,
+                  ),
+            const SizedBox(height: 10),
+             Text(
+                    robotPosition,
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+           
+              ],
               ],
             ),
           ),
-          Positioned(
-            bottom: 60,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                child: Text(
-                  'Robot Position:',
-                  style: Theme.of(context).textTheme.headlineMedium,
-                ),
-              ),
+          Align(
+            alignment: Alignment.topRight,
+            child: ElevatedButton(
+              child: Text(pressed ? "Disable Joystick" : "Enable Joystick",
+                  style:  TextStyle(
+                    color: pressed ? Colors.red : Colors.green,
+                  )
+             ),
+              onPressed: () {
+                setState(() {
+                  pressed = !pressed;
+                });
+              },
             ),
           ),
+          
 
-          Positioned(
-            bottom: 20,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                child: Text(
-                  robotPosition,
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-              ),
-            ),
-          ),
+           
+          
         ],
       ),
     );
