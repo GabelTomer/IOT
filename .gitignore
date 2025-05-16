@@ -18,3 +18,5 @@ core/detection/__pycache__/detection.cpython-311.pyc
 /core/detection/__pycache__
 /core/detection/__pycache__
 /core/server/__pycache__
+application/aruco_ui/.metadata
+application/aruco_ui/pubspec.lock

@@ -40,23 +40,25 @@ class Detection:
 
         self.known_markers = self.load_known_markers(known_markers_path) if known_markers_path else {}
     
-    def update_known_markers(self):
-        self.known_markers = self.load_known_markers(self.known_markers_path)
+    def update_known_markers(self, room="1"):
+        self.known_markers = self.load_known_markers(self.known_markers_path, room)
     
-    def load_known_markers(self, path):
+    def load_known_markers(self, path, room="1"):
         with open(path, 'r') as file:
             data = json.load(file)
         
         known_markers = {}
-        for k, v in data.items():
-            if isinstance(v, dict):
-                # Extract x, y, z from dict
-                known_markers[str(k)] = np.array([v["x"], v["y"], v["z"]], dtype=np.float32)
-            elif isinstance(v, list):
-                # Directly use the list
-                known_markers[str(k)] = np.array(v, dtype=np.float32)
-            else:
-                raise ValueError(f"[ERROR] Invalid marker format for marker {k}: {v}")
+        if room in data:
+            data = data[room]
+            for  marker, values in data.items():
+                if isinstance(values, dict):
+                    # Extract x, y, z from dict
+                    known_markers[str(marker)] = np.array([values["x"], values["y"], values["z"]], dtype=np.float32)
+                elif isinstance(values, list):
+                    # Directly use the list
+                    known_markers[str(marker)] = np.array(values, dtype=np.float32)
+                else:
+                    raise ValueError(f"[ERROR] Invalid marker format for marker {marker}: {values}")
         return known_markers
 
     def aruco_detect(self, frame, marker_dict="DICT_4X4_50"):
