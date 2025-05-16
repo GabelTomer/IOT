@@ -57,7 +57,7 @@ class _ConnectionPage extends State<ConnectionPage> {
       passwordController.clear();
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (context) => RobotControl(ipAddress: ip)),
+        MaterialPageRoute(builder: (context) => roomControl(ipAddress: ip)),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -103,9 +103,98 @@ class _ConnectionPage extends State<ConnectionPage> {
   }
 }
 
+class roomControl extends StatefulWidget {
+  final String ipAddress;
+  const roomControl({super.key, required this.ipAddress});
+
+  @override
+  State<roomControl> createState() => _roomControl();
+}
+
+class _roomControl extends State<roomControl> {
+  List<String> roomNames = [];
+  String? selectedRoom;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchRoomNames();
+  }
+
+  @override
+  void dispose() {
+    roomNames.clear();
+    super.dispose();
+  }
+
+  Future<void> fetchRoomNames() async {
+    final response = await http.get(
+      Uri.parse('http://${widget.ipAddress}:5000/get_rooms'),
+    );
+
+    if (response.statusCode == 200) {
+      List<dynamic> jsonData = json.decode(response.body);
+      roomNames = jsonData.cast<String>();
+      setState(() {}); // Update UI
+    } else {
+      throw Exception('Failed to load room names');
+    }
+  }
+
+  void callRobotControl() {
+    if (selectedRoom != null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => RobotControl(ipAddress: widget.ipAddress, room: selectedRoom!),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a room')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Choose Room')),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text('Choose a room:'),
+            DropdownButton<String>(
+              value: selectedRoom,
+              hint: Text("Select a Room"),
+              items:
+                  roomNames.map((room) {
+                    return DropdownMenuItem(value: room, child: Text(room));
+                  }).toList(),
+              onChanged: (value) {
+                setState(() {
+                  selectedRoom = value;
+                });
+              },
+            ),
+            const SizedBox(height: 30),
+            ElevatedButton(
+              onPressed: callRobotControl,
+              child: const Text('Connect'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class RobotControl extends StatefulWidget {
   final String ipAddress;
-  const RobotControl({super.key, required this.ipAddress});
+  final String room;
+  const RobotControl({super.key, required this.ipAddress, required this.room});
+
 
   @override
   State<RobotControl> createState() => _RobotControl();
@@ -156,9 +245,10 @@ class _RobotControl extends State<RobotControl> {
   var knownMarkers = <String, Marker>{};
   DateTime _lastSent = DateTime.now();
   bool pressed = false;
+ 
   // Adjust based on your robot's IP
   final String robotIP = "192.168.1.104";
-  
+
   // Send joystick data, throttle to every 100ms
   void sendJoystickCommand(double x, double y) async {
     final now = DateTime.now();
@@ -174,7 +264,7 @@ class _RobotControl extends State<RobotControl> {
     try {
       await http.get(uri);
     } catch (e) {
-      print("Error sending joystick data: $e");
+      logger.e("Error sending joystick data: $e");
     }
   }
 
@@ -188,7 +278,7 @@ class _RobotControl extends State<RobotControl> {
   Future<void> fetchKnownMarkers() async {
     try {
       final response = await http.get(
-        Uri.parse('http://${widget.ipAddress}:5000/get_Known_Markers'),
+        Uri.parse('http://${widget.ipAddress}:5000/get_Known_Markers/${widget.room}'),
       );
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -278,7 +368,13 @@ class _RobotControl extends State<RobotControl> {
     final response = await http.post(
       Uri.parse(url),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'id': id, 'x': pos.dx, 'y': pos.dy, 'z': z}),
+      body: jsonEncode({
+        'id': id,
+        'x': pos.dx,
+        'y': pos.dy,
+        'z': z,
+        'room': widget.room,
+      }),
     );
     if (response.statusCode == 200) {
       logger.i("Marker $id added successfully");
@@ -292,7 +388,13 @@ class _RobotControl extends State<RobotControl> {
     final response = await http.post(
       Uri.parse(url),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'id': id, 'x': pos.dx, 'y': pos.dy, 'z': z}),
+      body: jsonEncode({
+        'id': id,
+        'x': pos.dx,
+        'y': pos.dy,
+        'z': z,
+        'room': widget.room,
+      }),
     );
     if (response.statusCode == 200) {
       logger.i("Marker $id updated successfully");
@@ -306,7 +408,7 @@ class _RobotControl extends State<RobotControl> {
     final response = await http.post(
       Uri.parse(url),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'id': id}),
+      body: jsonEncode({'id': id, 'room': widget.room}),
     );
     if (response.statusCode == 200) {
       logger.i("Marker $id deleted");
@@ -550,7 +652,7 @@ class _RobotControl extends State<RobotControl> {
               ),
             ),
           ),
-      
+
           Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -643,50 +745,46 @@ class _RobotControl extends State<RobotControl> {
                   ),
                 ),
                 const SizedBox(height: 10),
-              if (pressed) ...[
-           Text(
+                if (pressed) ...[
+                  Text(
                     'Robot Position:',
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
-            const SizedBox(height: 10),
+                  const SizedBox(height: 10),
 
-          Text(
+                  Text(
                     robotPosition,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
-            const SizedBox(height: 10),
+                  const SizedBox(height: 10),
 
-           Joystick(
-                  mode: JoystickMode.all,
-                  listener: (details) {
-                    sendJoystickCommand(details.x, details.y);
-                  },
-                ),
-  
-
-          ] else ...[
-             Text(
+                  Joystick(
+                    mode: JoystickMode.all,
+                    listener: (details) {
+                      sendJoystickCommand(details.x, details.y);
+                    },
+                  ),
+                ] else ...[
+                  Text(
                     'Robot Position:',
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
-            const SizedBox(height: 10),
-             Text(
+                  const SizedBox(height: 10),
+                  Text(
                     robotPosition,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
-           
-              ],
+                ],
               ],
             ),
           ),
           Align(
             alignment: Alignment.topRight,
             child: ElevatedButton(
-              child: Text(pressed ? "Disable Joystick" : "Enable Joystick",
-                  style:  TextStyle(
-                    color: pressed ? Colors.red : Colors.green,
-                  )
-             ),
+              child: Text(
+                pressed ? "Disable Joystick" : "Enable Joystick",
+                style: TextStyle(color: pressed ? Colors.red : Colors.green),
+              ),
               onPressed: () {
                 setState(() {
                   pressed = !pressed;
@@ -694,10 +792,6 @@ class _RobotControl extends State<RobotControl> {
               },
             ),
           ),
-          
-
-           
-          
         ],
       ),
     );
