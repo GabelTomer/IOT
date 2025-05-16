@@ -99,70 +99,120 @@ def main():
         
     detector = Detection(known_markers_path="core/utils/known_markers.json")
 
-    flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector)
-    stop_event = threading.Event()
+    #flaskServer = server(port = 5000)
+    #stop_event = threading.Event()
     
-    server_thread = threading.Thread(target=runServer, args=(flaskServer,))
+    #server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     
-    server_thread.start()
+    #server_thread.start()
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
         sys.exit(1)
     # Main thread displays
+    
+    # === Kalman Filter Configuration ===
+    kalman = cv2.KalmanFilter(6, 3)  # 6 state variables (pos + velocity), 3 measurements (pos only)
+    # Transition matrix (state update: x = Ax + Bu + w)
+    kalman.transitionMatrix = np.array([
+        [1, 0, 0, 1, 0, 0],  # x
+        [0, 1, 0, 0, 1, 0],  # y
+        [0, 0, 1, 0, 0, 1],  # z
+        [0, 0, 0, 1, 0, 0],  # vx
+        [0, 0, 0, 0, 1, 0],  # vy
+        [0, 0, 0, 0, 0, 1]   # vz
+    ], dtype=np.float32)
+
+    #Measurement matrix (we only measure position)
+    kalman.measurementMatrix = np.eye(3, 6, dtype=np.float32)
+
+    kalman.processNoiseCov = np.eye(6, dtype=np.float32) * 1e-4
+    kalman.measurementNoiseCov = np.eye(3, dtype=np.float32) * 1e-2
+    kalman.errorCovPost = np.eye(6, dtype=np.float32)
+
+    # Initial state (0 position, 0 velocity)
+    kalman.statePost = np.zeros((6, 1), dtype=np.float32)
+    
     while True:
 
-      
             ret, frame = video.read()
             if not ret:
                 break
             
             corners, twoDArray, threeDArray, threeDCenters, frame = detector.aruco_detect(frame=frame)
             
-            
             if twoDArray is not None and threeDArray is not None:
-                if twoDArray.shape[0] < 4:
-                    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
-                    rvec = rvecs[0]
-                    tvec = tvecs[0]
-                    R_marker2world = np.eye(3)
-                #angle_rad = np.pi / 2
-                #R_marker2world = cv2.Rodrigues(np.array([angle_rad, 0, 0]))[0]
-                #R_marker2world[:, 1] *= -1  # Flip the y-axis
-                    R_marker2cam, _ = cv2.Rodrigues(rvec)
-                    t_marker2cam = tvec.reshape(3, 1)
-                    R_cam2marker = R_marker2cam.T
-                    t_cam2marker = -R_marker2cam.T @ t_marker2cam
-                    R_cam2world = R_marker2world @ R_cam2marker
-                    print(threeDArray.shape)
-                    t_cam2world = R_marker2world @ t_cam2marker + threeDCenters.reshape(3, 1)
-                    print(f"Camera Position: {t_cam2world}")
-                #print(f"Camera Position: {t_cam2world.flatten()}")
-                    flaskServer.updatePosition(t_cam2world[0][0], t_cam2world[1][0], t_cam2world[2][0])
-                elif len(twoDArray) >= 4 and len(threeDArray) >= 4 and len(twoDArray) == len(threeDArray):
+                if twoDArray.shape[0] < 3:
+                    if len(twoDArray) == 2 and len(threeDArray) == 2:
+                        img_pts = twoDArray.reshape(-1, 2).astype(np.float32)
+                        obj_pts = threeDArray.reshape(-1, 3).astype(np.float32)
+                        success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
+                        if success:
+                            R, _ = cv2.Rodrigues(rvec)
+                            position = -R.T @ tvec
+                            measured = np.array(position, dtype=np.float32).reshape(3, 1)
+                            kalman.correct(measured)
+                            predicted = kalman.predict()
+                            filtered_pos = predicted[:3]
+                            print(f"Filtered Camera Position -> X: {filtered_pos[0][0]:.2f}, Y: {filtered_pos[1][0]:.2f}, Z: {filtered_pos[2][0]:.2f}")
+                            
+                    elif len(twoDArray) == 1:
+                        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
+                        rvec = rvecs[0]
+                        tvec = tvecs[0]
+                        #R_marker2world = np.eye(3)
+                        #angle_rad = np.pi / 2
+                        #R_marker2world = cv2.Rodrigues(np.array([angle_rad, 0, 0]))[0]
+                        #R_marker2world[:, 1] *= -1  # Flip the y-axis
+                        R_marker2cam, _ = cv2.Rodrigues(rvec)
+                        t_marker2cam = tvec.reshape(3, 1)
+                        R_cam2marker = R_marker2cam.T
+                        t_cam2marker = -R_marker2cam.T @ t_marker2cam
+                        #R_cam2world = R_marker2world @ R_cam2marker
+                        center_avg = np.mean(threeDCenters, axis=0).reshape(3, 1)
+                        t_cam2world = R_cam2marker @ t_cam2marker + center_avg
+
+
+                        # Compute average position with Kalman Filter
+                        measured = t_cam2world.reshape(3, 1).astype(np.float32)
+                        kalman.correct(measured)
+                        predicted = kalman.predict()
+                        filtered_pos = predicted[:3]
+                        # Update server with smoothed average
+                        #flaskServer.updatePosition(filtered_pos[0][0], filtered_pos[1][0], filtered_pos[2][0])
+                        #print Average Camera Position
+                        print(f"Filtered Camera Position -> X: {filtered_pos[0][0]:.2f}, Y: {filtered_pos[1][0]:.2f}, Z: {filtered_pos[2][0]:.2f}")
+                
+                
+                elif len(twoDArray) >= 3 and len(threeDArray) >= 3 and len(twoDArray) == len(threeDArray):
+                    flags = cv2.SOLVEPNP_ITERATIVE if len(twoDArray) > 3 else cv2.SOLVEPNP_P3P
                     img_pts = twoDArray.reshape(-1, 2).astype(np.float32)
                     obj_pts = threeDArray.reshape(-1, 3).astype(np.float32)
-                    success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
+                    success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags)
                     if success:
                         R, _ = cv2.Rodrigues(rvec)
                         position = -R.T @ tvec
-                        flaskServer.updatePosition(position[0][0], position[1][0], position[2][0])
-                        print(f"Position -> X: {position[0][0]:.2f}, Y: {position[1][0]:.2f}, Z: {position[2][0]:.2f}")
-                    else:
-                        print(f"[ERROR] Mismatch or not enough points: {len(twoDArray)} 2D points, {len(threeDArray)} 3D points")
+                        measured = np.array(position, dtype=np.float32).reshape(3, 1)
+                        kalman.correct(measured)
+                        predicted = kalman.predict()
+                        filtered_pos = predicted[:3]
+                        #flaskServer.updatePosition(filtered_pos[0][0], filtered_pos[1][0], filtered_pos[2][0])
+                        print(f"Filtered Camera Position -> X: {filtered_pos[0][0]:.2f}, Y: {filtered_pos[1][0]:.2f}, Z: {filtered_pos[2][0]:.2f}")
+                else:
+                    print(f"[ERROR] Mismatch or not enough points: {len(twoDArray)} 2D points, {len(threeDArray)} 3D points")
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
+    
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
-                stop_event.set()  # <<<<<< Tell all threads to stop
+                #stop_event.set()  # <<<<<< Tell all threads to stop
                 break
-
 
     cv2.destroyAllWindows()
 
     #Now wait for all threads to end
-    server_thread.join()
+    #server_thread.join()
 
 if __name__ == "__main__":
     main()
