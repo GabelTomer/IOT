@@ -43,6 +43,11 @@ class Detection:
     def update_known_markers(self, room="1"):
         self.known_markers = self.load_known_markers(self.known_markers_path, room)
     
+  
+
+
+
+    
     def load_known_markers(self, path, room="1"):
         with open(path, 'r') as file:
             data = json.load(file)
