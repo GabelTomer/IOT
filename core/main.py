@@ -85,6 +85,12 @@ def generate_aruco_board():
         x, y, z = positions_m[marker_id]
         print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
 
+def resource_path(relative_path):
+    import sys, os
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.abspath(relative_path)
+
 def main():
 
     #generate_aruco_board()

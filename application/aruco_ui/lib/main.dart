@@ -5,6 +5,7 @@ import 'dart:async';
 import 'package:logger/logger.dart';
 import 'package:validator_regex/validator_regex.dart';
 import 'package:flutter_joystick/flutter_joystick.dart';
+import 'package:flutter_typeahead/flutter_typeahead.dart';
 
 final logger = Logger();
 void main() {
@@ -141,18 +142,172 @@ class _roomControl extends State<roomControl> {
     }
   }
 
+  Future<void> notifyRoomSelection() async {
+    final url = 'http://${widget.ipAddress}:5000/notify_room_selection';
+    final response = await http.post(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'room': selectedRoom}),
+    );
+    if (response.statusCode == 200) {
+      logger.i("Selected Room: $selectedRoom");
+    } else {
+      logger.e("Failed to select room: ${response.statusCode}");
+    }
+  }
+
+
+
+
+  Iterable<String> _roomOptionsBuilder(TextEditingValue textEditingValue) {
+    if (textEditingValue.text == '') {
+      return roomNames;
+    }
+    return roomNames.where((String option) {
+      return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
+    });
+  }
+
+ void showEditRoomDialog(BuildContext context)  {
+    final roomController = TextEditingController();
+    var autoCompleteController = null;
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Edit Rooms'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // TextField(
+                //   controller: roomController,
+                //   decoration: const InputDecoration(labelText: 'Room Name'),
+                // ),
+                Autocomplete(
+                  optionsBuilder: _roomOptionsBuilder,
+                  fieldViewBuilder: (
+                    context,
+                    roomController,
+                    focusNode,
+                    onFieldSubmitted,
+                  ) {
+                    autoCompleteController = roomController;
+                    return TextField(
+                      controller: roomController,
+                      focusNode: focusNode,
+                      decoration: const InputDecoration(labelText: 'Room Name'),
+                    );
+                  },
+                  displayStringForOption: (option) => option,
+                  onSelected: (option) {
+                    roomController.text = option;
+                  },
+                ),
+                SizedBox(height: 20),
+              ],
+              
+            ),
+            
+            actions: [
+              TextButton(
+                onPressed: () =>{
+                    FocusScope.of(context).unfocus(),
+                   Navigator.pop(context)
+                   },
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () async {
+                   FocusScope.of(context).unfocus(); 
+                   Future.microtask(() async {
+                  final roomName = autoCompleteController == null ? roomController.text.trim() : autoCompleteController.text.trim();
+                  if (roomName.isNotEmpty && !roomNames.contains(roomName)) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Room does not exist')),
+                    );
+                    return;
+                  }
+                  if (roomName.isNotEmpty) {
+                    await deleteRoom(roomName);
+                    Navigator.pop(context);
+                    fetchRoomNames();
+                    setState(() {}); // Refresh
+                  }
+                    });
+                },
+                child: const Text('delete'),
+              ),
+              TextButton(
+                onPressed: () async {
+                   FocusScope.of(context).unfocus(); 
+                   Future.microtask(() async {
+                  final roomName = autoCompleteController == null ? roomController.text.trim() : autoCompleteController.text.trim();
+                  if (roomName.isNotEmpty && roomNames.contains(roomName)) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Room Name already exists')),
+                    );
+                    return;
+                  }
+                  if (roomName.isNotEmpty) {
+                    await addRoom(roomName);
+                    Navigator.pop(context);
+                    fetchRoomNames();
+                    setState(() {}); // Refresh
+                  }
+                   });
+                },
+                child: const Text('Add'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  Future<void> deleteRoom(String room) async {
+    final url = 'http://${widget.ipAddress}:5000/delete_room';
+    final response = await http.post(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'room': room}),
+    );
+    if (response.statusCode == 200) {
+      logger.i("Room $room deleted successfully");
+    } else {
+      logger.e("Failed to delete room: ${response.statusCode}");
+    }
+  }
+
+  Future<void> addRoom(String room) async {
+    final url = 'http://${widget.ipAddress}:5000/add_room';
+    final response = await http.post(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'room': room}),
+    );
+    if (response.statusCode == 200) {
+      logger.i("Room $room added successfully");
+    } else {
+      logger.e("Failed to add room: ${response.statusCode}");
+    }
+  }
+
   void callRobotControl() {
     if (selectedRoom != null) {
+      notifyRoomSelection();
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => RobotControl(ipAddress: widget.ipAddress, room: selectedRoom!),
+          builder:
+              (context) => RobotControl(
+                ipAddress: widget.ipAddress,
+                room: selectedRoom!,
+              ),
         ),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a room')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please select a room')));
     }
   }
 
@@ -179,9 +334,20 @@ class _roomControl extends State<roomControl> {
               },
             ),
             const SizedBox(height: 30),
-            ElevatedButton(
-              onPressed: callRobotControl,
-              child: const Text('Connect'),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(width: 20),
+                ElevatedButton(
+                  onPressed: () => showEditRoomDialog(context),
+                  child: const Text('Edit Rooms'),
+                ),
+                const SizedBox(width: 20),
+                ElevatedButton(
+                  onPressed: callRobotControl,
+                  child: const Text('Connect'),
+                ),
+              ],
             ),
           ],
         ),
@@ -194,7 +360,6 @@ class RobotControl extends StatefulWidget {
   final String ipAddress;
   final String room;
   const RobotControl({super.key, required this.ipAddress, required this.room});
-
 
   @override
   State<RobotControl> createState() => _RobotControl();
@@ -245,7 +410,7 @@ class _RobotControl extends State<RobotControl> {
   var knownMarkers = <String, Marker>{};
   DateTime _lastSent = DateTime.now();
   bool pressed = false;
- 
+
   // Adjust based on your robot's IP
   final String robotIP = "192.168.1.104";
 
@@ -278,7 +443,9 @@ class _RobotControl extends State<RobotControl> {
   Future<void> fetchKnownMarkers() async {
     try {
       final response = await http.get(
-        Uri.parse('http://${widget.ipAddress}:5000/get_Known_Markers/${widget.room}'),
+        Uri.parse(
+          'http://${widget.ipAddress}:5000/get_Known_Markers/${widget.room}',
+        ),
       );
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -427,7 +594,7 @@ class _RobotControl extends State<RobotControl> {
     final double mapHeightMeters = 10.0; // Height of the map in meters
     double xScaleFactor = (mapSize.width / mapWidthMeters).floorToDouble();
     double yScaleFactor = (mapSize.height / mapHeightMeters).floorToDouble();
-    final double MAX_MARKER_ID = 256; // Maximum marker ID
+    final double maxMarkerId = 256; // Maximum marker ID
     Offset screenToWorld(Offset pos, Size mapSize) {
       const double mapWidthMeters = 10.0;
       const double mapHeightMeters = 10.0;
@@ -568,7 +735,7 @@ class _RobotControl extends State<RobotControl> {
                       return;
                     }
 
-                    if (id.isNotEmpty && double.parse(id) > MAX_MARKER_ID) {
+                    if (id.isNotEmpty && double.parse(id) > maxMarkerId) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
                           content: Text(

@@ -1,9 +1,11 @@
 from flask import Flask, jsonify, request
 import json
 import threading
+
 class server:
     def __init__(self,  port = 5000, known_markers_path=None, detector=None):
         self.detector = detector
+        self.chosen_room = None
         self.known_markers = self.load_known_markers(known_markers_path) if known_markers_path else {}
         self.known_markers_path = known_markers_path
         self.lock = threading.Lock()
@@ -19,6 +21,8 @@ class server:
             self.rooms = []
         self.app = Flask(__name__)
     
+   
+    
     def load_known_markers(self, path):
         with open(path, 'r') as file:
             data = json.load(file)
@@ -26,12 +30,14 @@ class server:
             raise ValueError("[ERROR] No known markers found in the file.")
             return {}
         return data
-
+    
     
     def save_markers(self, data, room="1"):
         with open(self.known_markers_path, "w") as f:
             json.dump(data, f, indent=2)
         self.known_markers = data
+        self.chosen_room = room
+        self.rooms = list(self.known_markers.keys())
         self.detector.update_known_markers(room=room)
     
     def run(self):
@@ -53,6 +59,16 @@ class server:
         @self.app.route('/get_rooms')
         def get_rooms():
             return jsonify(self.rooms)
+        
+        @self.app.route('/notify_room_selection', methods=['POST'])
+        def notify_room_selection():
+            data = request.get_json()
+            room = data.get('room')
+            if room in self.known_markers:
+                self.detector.update_known_markers(room=room)
+                return jsonify({"status": "success", "room": room})
+            else:
+                return jsonify({"error": "Room not found"}), 404
         
         @self.app.route('/update_position', methods=['POST']) #gets input from application on where to move
         def update_position():
@@ -80,6 +96,17 @@ class server:
             self.save_markers(self.known_markers, room=room)
             return jsonify({"status": "updated", "id": marker_id}), 200
         
+        
+        @self.app.route('/delete_room', methods=['POST'])
+        def delete_room():
+            data = request.get_json()
+            room_name = str(data.get("room"))
+            if room_name not in self.known_markers:
+                return jsonify({"error": "Room not found"}), 404
+            del self.known_markers[room_name]
+            self.save_markers(self.known_markers)
+            return jsonify({"status": "deleted", "name": room_name}), 200
+            
         
         @self.app.route('/delete_marker', methods=['POST'])
         def delete_marker():
@@ -116,6 +143,17 @@ class server:
                 self.save_markers(self.known_markers, room=room)
                 return jsonify({'status': 'success'}), 200
             return jsonify({'error': 'Invalid input'}), 400
+        
+        @self.app.route('/add_room', methods=['POST'])
+        def add_room():
+            data = request.get_json()
+            room_name = data.get('room')
+            if room_name:
+                self.known_markers[room_name] = {}
+                self.save_markers(self.known_markers, room = self.chosen_room)
+                return jsonify({'status': 'success'}), 200
+            return jsonify({'error': 'Invalid input'}), 400
+    
     
     def updatePosition(self, x, y, z):
         with self.lock:
