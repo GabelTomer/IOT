@@ -20,7 +20,25 @@ class ArucoApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Aruco Robot UI',
-      theme: ThemeData(primarySwatch: Colors.blue),
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        scaffoldBackgroundColor: const Color.fromARGB(255, 230, 232, 244),
+        appBarTheme: AppBarTheme(
+          backgroundColor: const Color.fromARGB(
+            255,
+            230,
+            232,
+            244,
+          ), // Global AppBar color
+          foregroundColor: const Color.fromARGB(
+            203,
+            0,
+            0,
+            0,
+          ), // Global text/icon color
+          elevation: 0, // Optional: Flat style
+        ),
+      ),
       home: const ConnectionPage(),
     );
   }
@@ -58,7 +76,9 @@ class _ConnectionPage extends State<ConnectionPage> {
       passwordController.clear();
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (context) => roomControl(ipAddress: ip)),
+        MaterialPageRoute(
+          builder: (context) => RoomSelectorPage(ipAddress: ip),
+        ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -70,7 +90,6 @@ class _ConnectionPage extends State<ConnectionPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Connect to Robot')),
       body: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Column(
@@ -104,16 +123,265 @@ class _ConnectionPage extends State<ConnectionPage> {
   }
 }
 
-class roomControl extends StatefulWidget {
-  final String ipAddress;
-  const roomControl({super.key, required this.ipAddress});
+// class roomControl extends StatefulWidget {
+//   final String ipAddress;
+//   const roomControl({super.key, required this.ipAddress});
 
+//   @override
+//   State<roomControl> createState() => _roomControl();
+// }
+
+// class _roomControl extends State<roomControl> {
+//   List<String> roomNames = [];
+//   String? selectedRoom;
+
+//   @override
+//   void initState() {
+//     super.initState();
+//     fetchRoomNames();
+//   }
+
+//   @override
+//   void dispose() {
+//     roomNames.clear();
+//     super.dispose();
+//   }
+
+//   Future<void> fetchRoomNames() async {
+//     final response = await http.get(
+//       Uri.parse('http://${widget.ipAddress}:5000/get_rooms'),
+//     );
+
+//     if (response.statusCode == 200) {
+//       List<dynamic> jsonData = json.decode(response.body);
+//       roomNames = jsonData.cast<String>();
+//       setState(() {}); // Update UI
+//     } else {
+//       throw Exception('Failed to load room names');
+//     }
+//   }
+
+//   Future<void> notifyRoomSelection() async {
+//     final url = 'http://${widget.ipAddress}:5000/notify_room_selection';
+//     final response = await http.post(
+//       Uri.parse(url),
+//       headers: {'Content-Type': 'application/json'},
+//       body: jsonEncode({'room': selectedRoom}),
+//     );
+//     if (response.statusCode == 200) {
+//       logger.i("Selected Room: $selectedRoom");
+//     } else {
+//       logger.e("Failed to select room: ${response.statusCode}");
+//     }
+//   }
+
+//   Iterable<String> _roomOptionsBuilder(TextEditingValue textEditingValue) {
+//     if (textEditingValue.text == '') {
+//       return roomNames;
+//     }
+//     return roomNames.where((String option) {
+//       return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
+//     });
+//   }
+
+//  void showEditRoomDialog(BuildContext context)  {
+//     final roomController = TextEditingController();
+//     var autoCompleteController;
+//     showDialog(
+//       context: context,
+//       builder:
+//           (context) => AlertDialog(
+//             title: const Text('Edit Rooms'),
+//             content: Column(
+//               mainAxisSize: MainAxisSize.min,
+//               children: [
+//                 // TextField(
+//                 //   controller: roomController,
+//                 //   decoration: const InputDecoration(labelText: 'Room Name'),
+//                 // ),
+//                 Autocomplete(
+//                   optionsBuilder: _roomOptionsBuilder,
+//                   fieldViewBuilder: (
+//                     context,
+//                     roomController,
+//                     focusNode,
+//                     onFieldSubmitted,
+//                   ) {
+//                     autoCompleteController = roomController;
+//                     return TextField(
+//                       controller: roomController,
+//                       focusNode: focusNode,
+//                       decoration: const InputDecoration(labelText: 'Room Name'),
+//                     );
+//                   },
+//                   displayStringForOption: (option) => option,
+//                   onSelected: (option) {
+//                     roomController.text = option;
+//                   },
+//                 ),
+//                 SizedBox(height: 20),
+//               ],
+
+//             ),
+
+//             actions: [
+//               TextButton(
+//                 onPressed: () =>{
+//                     FocusScope.of(context).unfocus(),
+//                    Navigator.pop(context)
+//                    },
+//                 child: const Text('Cancel'),
+//               ),
+//               TextButton(
+//                 onPressed: () async {
+//                    FocusScope.of(context).unfocus();
+//                    Future.microtask(() async {
+//                   final roomName = autoCompleteController == null ? roomController.text.trim() : autoCompleteController.text.trim();
+//                   if (roomName.isNotEmpty && !roomNames.contains(roomName)) {
+//                     ScaffoldMessenger.of(context).showSnackBar(
+//                       const SnackBar(content: Text('Room does not exist')),
+//                     );
+//                     return;
+//                   }
+//                   if (roomName.isNotEmpty) {
+//                     await deleteRoom(roomName);
+//                     Navigator.pop(context);
+//                     fetchRoomNames();
+//                     setState(() {}); // Refresh
+//                   }
+//                     });
+//                 },
+//                 child: const Text('delete'),
+//               ),
+//               TextButton(
+//                 onPressed: () async {
+//                    FocusScope.of(context).unfocus();
+//                    Future.microtask(() async {
+//                   final roomName = autoCompleteController == null ? roomController.text.trim() : autoCompleteController.text.trim();
+//                   if (roomName.isNotEmpty && roomNames.contains(roomName)) {
+//                     ScaffoldMessenger.of(context).showSnackBar(
+//                       const SnackBar(content: Text('Room Name already exists')),
+//                     );
+//                     return;
+//                   }
+//                   if (roomName.isNotEmpty) {
+//                     await addRoom(roomName);
+//                     Navigator.pop(context);
+//                     fetchRoomNames();
+//                     setState(() {}); // Refresh
+//                   }
+//                    });
+//                 },
+//                 child: const Text('Add'),
+//               ),
+//             ],
+//           ),
+//     );
+//   }
+
+//   Future<void> deleteRoom(String room) async {
+//     final url = 'http://${widget.ipAddress}:5000/delete_room';
+//     final response = await http.post(
+//       Uri.parse(url),
+//       headers: {'Content-Type': 'application/json'},
+//       body: jsonEncode({'room': room}),
+//     );
+//     if (response.statusCode == 200) {
+//       logger.i("Room $room deleted successfully");
+//     } else {
+//       logger.e("Failed to delete room: ${response.statusCode}");
+//     }
+//   }
+
+//   Future<void> addRoom(String room) async {
+//     final url = 'http://${widget.ipAddress}:5000/add_room';
+//     final response = await http.post(
+//       Uri.parse(url),
+//       headers: {'Content-Type': 'application/json'},
+//       body: jsonEncode({'room': room}),
+//     );
+//     if (response.statusCode == 200) {
+//       logger.i("Room $room added successfully");
+//     } else {
+//       logger.e("Failed to add room: ${response.statusCode}");
+//     }
+//   }
+
+//   void callRobotControl() {
+//     if (selectedRoom != null) {
+//       notifyRoomSelection();
+//       Navigator.push(
+//         context,
+//         MaterialPageRoute(
+//           builder:
+//               (context) => RobotControl(
+//                 ipAddress: widget.ipAddress,
+//                 room: selectedRoom!,
+//               ),
+//         ),
+//       );
+//     } else {
+//       ScaffoldMessenger.of(
+//         context,
+//       ).showSnackBar(const SnackBar(content: Text('Please select a room')));
+//     }
+//   }
+
+//   @override
+//   Widget build(BuildContext context) {
+//     return Scaffold(
+//       appBar: AppBar(title: const Text('Choose Room')),
+//       body: Center(
+//         child: Column(
+//           mainAxisAlignment: MainAxisAlignment.center,
+//           children: [
+//             const Text('Choose a room:'),
+//             DropdownButton<String>(
+//               value: selectedRoom,
+//               hint: Text("Select a Room"),
+//               items:
+//                   roomNames.map((room) {
+//                     return DropdownMenuItem(value: room, child: Text(room));
+//                   }).toList(),
+//               onChanged: (value) {
+//                 setState(() {
+//                   selectedRoom = value;
+//                 });
+//               },
+//             ),
+//             const SizedBox(height: 30),
+//             Row(
+//               mainAxisAlignment: MainAxisAlignment.center,
+//               children: [
+//                 const SizedBox(width: 20),
+//                 ElevatedButton(
+//                   onPressed: () => showEditRoomDialog(context),
+//                   child: const Text('Edit Rooms'),
+//                 ),
+//                 const SizedBox(width: 20),
+//                 ElevatedButton(
+//                   onPressed: callRobotControl,
+//                   child: const Text('Connect'),
+//                 ),
+//               ],
+//             ),
+//           ],
+//         ),
+//       ),
+//     );
+//   }
+// }
+
+class RoomSelectorPage extends StatefulWidget {
+  final String ipAddress;
+  const RoomSelectorPage({super.key, required this.ipAddress});
   @override
-  State<roomControl> createState() => _roomControl();
+  State<RoomSelectorPage> createState() => _RoomSelectorPageState();
 }
 
-class _roomControl extends State<roomControl> {
+class _RoomSelectorPageState extends State<RoomSelectorPage> {
   List<String> roomNames = [];
+  bool editMode = false;
   String? selectedRoom;
 
   @override
@@ -126,6 +394,20 @@ class _roomControl extends State<roomControl> {
   void dispose() {
     roomNames.clear();
     super.dispose();
+  }
+
+  Future<void> addRoom(String room) async {
+    final url = 'http://${widget.ipAddress}:5000/add_room';
+    final response = await http.post(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'room': room}),
+    );
+    if (response.statusCode == 200) {
+      logger.i("Room $room added successfully");
+    } else {
+      logger.e("Failed to add room: ${response.statusCode}");
+    }
   }
 
   Future<void> fetchRoomNames() async {
@@ -142,127 +424,6 @@ class _roomControl extends State<roomControl> {
     }
   }
 
-  Future<void> notifyRoomSelection() async {
-    final url = 'http://${widget.ipAddress}:5000/notify_room_selection';
-    final response = await http.post(
-      Uri.parse(url),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'room': selectedRoom}),
-    );
-    if (response.statusCode == 200) {
-      logger.i("Selected Room: $selectedRoom");
-    } else {
-      logger.e("Failed to select room: ${response.statusCode}");
-    }
-  }
-
-
-
-
-  Iterable<String> _roomOptionsBuilder(TextEditingValue textEditingValue) {
-    if (textEditingValue.text == '') {
-      return roomNames;
-    }
-    return roomNames.where((String option) {
-      return option.toLowerCase().contains(textEditingValue.text.toLowerCase());
-    });
-  }
-
- void showEditRoomDialog(BuildContext context)  {
-    final roomController = TextEditingController();
-    var autoCompleteController = null;
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Edit Rooms'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // TextField(
-                //   controller: roomController,
-                //   decoration: const InputDecoration(labelText: 'Room Name'),
-                // ),
-                Autocomplete(
-                  optionsBuilder: _roomOptionsBuilder,
-                  fieldViewBuilder: (
-                    context,
-                    roomController,
-                    focusNode,
-                    onFieldSubmitted,
-                  ) {
-                    autoCompleteController = roomController;
-                    return TextField(
-                      controller: roomController,
-                      focusNode: focusNode,
-                      decoration: const InputDecoration(labelText: 'Room Name'),
-                    );
-                  },
-                  displayStringForOption: (option) => option,
-                  onSelected: (option) {
-                    roomController.text = option;
-                  },
-                ),
-                SizedBox(height: 20),
-              ],
-              
-            ),
-            
-            actions: [
-              TextButton(
-                onPressed: () =>{
-                    FocusScope.of(context).unfocus(),
-                   Navigator.pop(context)
-                   },
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () async {
-                   FocusScope.of(context).unfocus(); 
-                   Future.microtask(() async {
-                  final roomName = autoCompleteController == null ? roomController.text.trim() : autoCompleteController.text.trim();
-                  if (roomName.isNotEmpty && !roomNames.contains(roomName)) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Room does not exist')),
-                    );
-                    return;
-                  }
-                  if (roomName.isNotEmpty) {
-                    await deleteRoom(roomName);
-                    Navigator.pop(context);
-                    fetchRoomNames();
-                    setState(() {}); // Refresh
-                  }
-                    });
-                },
-                child: const Text('delete'),
-              ),
-              TextButton(
-                onPressed: () async {
-                   FocusScope.of(context).unfocus(); 
-                   Future.microtask(() async {
-                  final roomName = autoCompleteController == null ? roomController.text.trim() : autoCompleteController.text.trim();
-                  if (roomName.isNotEmpty && roomNames.contains(roomName)) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Room Name already exists')),
-                    );
-                    return;
-                  }
-                  if (roomName.isNotEmpty) {
-                    await addRoom(roomName);
-                    Navigator.pop(context);
-                    fetchRoomNames();
-                    setState(() {}); // Refresh
-                  }
-                   });
-                },
-                child: const Text('Add'),
-              ),
-            ],
-          ),
-    );
-  }
-
   Future<void> deleteRoom(String room) async {
     final url = 'http://${widget.ipAddress}:5000/delete_room';
     final response = await http.post(
@@ -277,18 +438,91 @@ class _roomControl extends State<roomControl> {
     }
   }
 
-  Future<void> addRoom(String room) async {
-    final url = 'http://${widget.ipAddress}:5000/add_room';
+  void showAddRoomDialog() {
+    String newRoom = '';
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: Text('Add Room'),
+            content: TextField(
+              autofocus: true,
+              decoration: InputDecoration(hintText: 'Enter room name'),
+              onChanged: (value) => newRoom = value,
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  if (newRoom.isNotEmpty) {
+                    if (roomNames.contains(newRoom)) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Room already exists')),
+                      );
+                      return;
+                    }
+                    addRoom(newRoom);
+                    setState(() {
+                      roomNames.add(newRoom);
+                    });
+                  }
+                  Navigator.pop(context);
+                },
+                child: Text('Add'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  void toggleEditMode() {
+    setState(() {
+      editMode = !editMode;
+    });
+  }
+
+  void deleteRoomFromUI(int index) {
+    if (roomNames.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('No rooms to delete')));
+      return;
+    }
+    if (index < 0 || index >= roomNames.length) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Invalid room index')));
+      return;
+    }
+    deleteRoom(roomNames[index]);
+    setState(() {
+      if (roomNames[index] == selectedRoom) selectedRoom = null;
+      roomNames.removeAt(index);
+    });
+  }
+
+  Future<void> notifyRoomSelection() async {
+    final url = 'http://${widget.ipAddress}:5000/notify_room_selection';
     final response = await http.post(
       Uri.parse(url),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'room': room}),
+      body: jsonEncode({'room': selectedRoom}),
     );
     if (response.statusCode == 200) {
-      logger.i("Room $room added successfully");
+      logger.i("Selected Room: $selectedRoom");
     } else {
-      logger.e("Failed to add room: ${response.statusCode}");
+      logger.e("Failed to select room: ${response.statusCode}");
     }
+  }
+
+  void connectToRoom(String room) {
+    setState(() {
+      selectedRoom = room;
+    });
+    callRobotControl();
   }
 
   void callRobotControl() {
@@ -314,43 +548,50 @@ class _roomControl extends State<roomControl> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Choose Room')),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text('Choose a room:'),
-            DropdownButton<String>(
-              value: selectedRoom,
-              hint: Text("Select a Room"),
-              items:
-                  roomNames.map((room) {
-                    return DropdownMenuItem(value: room, child: Text(room));
-                  }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  selectedRoom = value;
-                });
-              },
+      appBar: AppBar(
+        title: Text('Rooms'),
+        actions: [
+          IconButton(
+            icon: Icon(editMode ? Icons.check : Icons.edit),
+            onPressed: toggleEditMode,
+          ),
+        ],
+      ),
+      body: ListView.builder(
+        itemCount: roomNames.length,
+        itemBuilder: (context, index) {
+          final room = roomNames[index];
+          return Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
             ),
-            const SizedBox(height: 30),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const SizedBox(width: 20),
-                ElevatedButton(
-                  onPressed: () => showEditRoomDialog(context),
-                  child: const Text('Edit Rooms'),
-                ),
-                const SizedBox(width: 20),
-                ElevatedButton(
-                  onPressed: callRobotControl,
-                  child: const Text('Connect'),
-                ),
-              ],
+            child: ListTile(
+              title: Text(room),
+              trailing:
+                  editMode
+                      ? IconButton(
+                        icon: Icon(Icons.delete, color: Colors.red),
+                        onPressed: () => deleteRoomFromUI(index),
+                      )
+                      : null,
+              onTap:
+                  editMode
+                      ? null
+                      : () {
+                        connectToRoom(room);
+                      },
+              selected: room == selectedRoom,
+              selectedTileColor: Colors.blue.shade100,
             ),
-          ],
-        ),
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: showAddRoomDialog,
+        tooltip: 'Add Room',
+        child: Icon(Icons.add),
       ),
     );
   }
@@ -786,46 +1027,55 @@ class _RobotControl extends State<RobotControl> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Robot ArUco UI')),
-      body: Stack(
-        children: [
-          // Status Indicator in the top-right corner
-          Positioned(
-            top: 0,
-            left: 0,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Text(
-                isConnected ? 'Connected' : 'Disconnected',
-                style: TextStyle(
-                  color: isConnected ? Colors.green : Colors.red,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-          // Main content in the center
-          Positioned(
-            top: 20,
-            left: 0,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Text(
-                error,
-                style: TextStyle(
-                  color: errorOccurred ? Colors.red : Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
+     body: Stack(
+  children: [
+    // Back button
+    Positioned(
+      top: 20,
+      left: 16,
+      child: IconButton(
+        icon: Icon(Icons.arrow_back, size: 28),
+        onPressed: () => Navigator.pop(context),
+      ),
+    ),
 
+    // "Connected"/"Disconnected" aligned below the tip of the arrow
+    Positioned(
+      top: 58, // adjust this to fine-tune vertical spacing
+      left: 40, // this puts the 'C' under the tip of the arrow
+      child: Text(
+        isConnected ? 'Connected' : 'Disconnected',
+        style: TextStyle(
+          color: isConnected ? Colors.green : Colors.red,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    ),
+    if(errorOccurred) ...[
+    Positioned(
+      top: 78, // adjust this to fine-tune vertical spacing
+      left: 40, // this puts the 'C' under the tip of the arrow
+      child: Text(
+              error,
+              style: TextStyle(
+                color: Colors.red,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+        ),
+      
+    
+    ],
+    // Error text or other content below
+    
+          // Status Indicator in the top-right corner
+
+          // Main content in the center
           Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.start,
               children: [
-                SizedBox(height: 80),
                 Container(
                   width: screenWidth * 0.8,
                   height: screenHeight * 0.4,
@@ -945,9 +1195,16 @@ class _RobotControl extends State<RobotControl> {
               ],
             ),
           ),
-          Align(
-            alignment: Alignment.topRight,
+
+          Positioned(
+            top: 50, // push it down from the top
+            right: 16, // push it away from the right edge
             child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                elevation: 6, // gives a floating effect
+                backgroundColor: Colors.white,
+                shadowColor: Colors.black54,
+              ),
               child: Text(
                 pressed ? "Disable Joystick" : "Enable Joystick",
                 style: TextStyle(color: pressed ? Colors.red : Colors.green),
