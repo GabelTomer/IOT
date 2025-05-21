@@ -68,7 +68,7 @@ class Camera:
         if not os.path.exists(images_folder) and any(fname.endswith(".jpg") for fname in os.listdir(images_folder)):
             generate_data_for_calibrate()
         else:
-            print("📂 Existing images detected — skipping calibration.")
+            print("📂 Existing images detected — skipping data generating...")
         # === CONFIGURATION ===
         images_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aruco_data")
         aruco_dict = self.DICTIONARY

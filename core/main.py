@@ -6,15 +6,17 @@ import numpy as np
 from utils import Camera
 from detection import Detection
 import sys
+from communication.pose_aggregator import PoseAggregator
 from server.flaskServer import server
 import random
+import socket
+import json
 
 
 def runServer(flaskServer : server):
     
     flaskServer.setup_routes()
     flaskServer.run()
-
 
 def generate_aruco_board():
     # Constants
@@ -85,6 +87,43 @@ def generate_aruco_board():
         x, y, z = positions_m[marker_id]
         print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
 
+def socket_listener(port, aggregator,flaskServer):
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(('', port))  # '' means listen on all network interfaces
+    server_socket.listen(1)
+    print(f"[SERVER] Listening on port {port}...")
+
+    conn, addr = server_socket.accept()
+    print(f"[SERVER] Connected by {addr} on port {port}")
+
+    while True:
+        try:
+            data = conn.recv(1024).decode()
+            if not data:
+                break
+
+            pose_data = json.loads(data)
+            client_id = pose_data.get("client_id")
+            x, y, z = pose_data.get("x"), pose_data.get("y"), pose_data.get("z")
+            
+            if client_id is not None:
+                if x is not None and y is not None and z is not None:
+                    aggregator.update_remote_pose(client_id, (x, y, z))                
+                else:
+                    # Clear this client's pose
+                    aggregator.remove_remote_pose(client_id)
+                
+                x,y,z = aggregator.get_average_pose()
+                # Update server with smoothed average
+                flaskServer.updatePosition(x, y, z)
+
+        except Exception as e:
+            print(f"[ERROR] Socket on port {port}: {e}")
+            break
+
+    conn.close()
+    print(f"[SERVER] Connection closed on port {port}")
+
 def main():
 
     generate_aruco_board()
@@ -101,8 +140,13 @@ def main():
 
     flaskServer = server(port = 5000)
     stop_event = threading.Event()
+    aggregator = PoseAggregator()
     
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
+    
+    # Start listener threads for clients
+    threading.Thread(target=socket_listener, args=(6001, aggregator,flaskServer), daemon=True).start()
+    threading.Thread(target=socket_listener, args=(6002, aggregator), daemon=True).start()
     
     server_thread.start()
     video = cv2.VideoCapture(0)
@@ -133,6 +177,7 @@ def main():
     # Initial state (0 position, 0 velocity)
     kalman.statePost = np.zeros((6, 1), dtype=np.float32)
     
+    filtered_pos = 0
     while True:
 
             ret, frame = video.read()
@@ -154,7 +199,6 @@ def main():
                             kalman.correct(measured)
                             predicted = kalman.predict()
                             filtered_pos = predicted[:3]
-                            print(f"Filtered Camera Position -> X: {filtered_pos[0][0]:.2f}, Y: {filtered_pos[1][0]:.2f}, Z: {filtered_pos[2][0]:.2f}")
                             
                     elif len(twoDArray) == 1:
                         rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
@@ -178,11 +222,6 @@ def main():
                         kalman.correct(measured)
                         predicted = kalman.predict()
                         filtered_pos = predicted[:3]
-                        # Update server with smoothed average
-                        flaskServer.updatePosition(filtered_pos[0][0], filtered_pos[1][0], filtered_pos[2][0])
-                        #print Average Camera Position
-                        print(f"Filtered Camera Position -> X: {filtered_pos[0][0]:.2f}, Y: {filtered_pos[1][0]:.2f}, Z: {filtered_pos[2][0]:.2f}")
-                
                 
                 elif len(twoDArray) >= 3 and len(threeDArray) >= 3 and len(twoDArray) == len(threeDArray):
                     flags = cv2.SOLVEPNP_ITERATIVE if len(twoDArray) > 3 else cv2.SOLVEPNP_P3P
@@ -196,14 +235,19 @@ def main():
                         kalman.correct(measured)
                         predicted = kalman.predict()
                         filtered_pos = predicted[:3]
-                        flaskServer.updatePosition(filtered_pos[0][0], filtered_pos[1][0], filtered_pos[2][0])
-                        print(f"Filtered Camera Position -> X: {filtered_pos[0][0]:.2f}, Y: {filtered_pos[1][0]:.2f}, Z: {filtered_pos[2][0]:.2f}")
-                else:
-                    print(f"[ERROR] Mismatch or not enough points: {len(twoDArray)} 2D points, {len(threeDArray)} 3D points")
+                
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
+                aggregator.update_main_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]))
+                x,y,z = aggregator.get_average_pose()
+                # Update server with smoothed average
+                flaskServer.updatePosition(x, y, z)
+                #print Average Camera Position
+                print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
     
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
+                aggregator.update_main_pose(None)
+                
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 stop_event.set()  # <<<<<< Tell all threads to stop
