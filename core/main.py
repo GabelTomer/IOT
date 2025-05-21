@@ -87,7 +87,7 @@ def generate_aruco_board():
 
 def main():
 
-    #generate_aruco_board()
+    generate_aruco_board()
     recalibrate = False
     camera = Camera()
 
@@ -99,12 +99,12 @@ def main():
         
     detector = Detection(known_markers_path="core/utils/known_markers.json")
 
-    #flaskServer = server(port = 5000)
-    #stop_event = threading.Event()
+    flaskServer = server(port = 5000)
+    stop_event = threading.Event()
     
-    #server_thread = threading.Thread(target=runServer, args=(flaskServer,))
+    server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     
-    #server_thread.start()
+    server_thread.start()
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
@@ -179,7 +179,7 @@ def main():
                         predicted = kalman.predict()
                         filtered_pos = predicted[:3]
                         # Update server with smoothed average
-                        #flaskServer.updatePosition(filtered_pos[0][0], filtered_pos[1][0], filtered_pos[2][0])
+                        flaskServer.updatePosition(filtered_pos[0][0], filtered_pos[1][0], filtered_pos[2][0])
                         #print Average Camera Position
                         print(f"Filtered Camera Position -> X: {filtered_pos[0][0]:.2f}, Y: {filtered_pos[1][0]:.2f}, Z: {filtered_pos[2][0]:.2f}")
                 
@@ -196,7 +196,7 @@ def main():
                         kalman.correct(measured)
                         predicted = kalman.predict()
                         filtered_pos = predicted[:3]
-                        #flaskServer.updatePosition(filtered_pos[0][0], filtered_pos[1][0], filtered_pos[2][0])
+                        flaskServer.updatePosition(filtered_pos[0][0], filtered_pos[1][0], filtered_pos[2][0])
                         print(f"Filtered Camera Position -> X: {filtered_pos[0][0]:.2f}, Y: {filtered_pos[1][0]:.2f}, Z: {filtered_pos[2][0]:.2f}")
                 else:
                     print(f"[ERROR] Mismatch or not enough points: {len(twoDArray)} 2D points, {len(threeDArray)} 3D points")
@@ -206,13 +206,13 @@ def main():
                 print("[ERROR] twoDArray or threeDArray is None!")
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
-                #stop_event.set()  # <<<<<< Tell all threads to stop
+                stop_event.set()  # <<<<<< Tell all threads to stop
                 break
 
     cv2.destroyAllWindows()
 
     #Now wait for all threads to end
-    #server_thread.join()
+    server_thread.join()
 
 if __name__ == "__main__":
     main()
