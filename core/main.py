@@ -1,4 +1,5 @@
 import threading
+import struct
 import queue
 import cv2
 import time
@@ -11,6 +12,8 @@ from server.flaskServer import server
 import random
 import socket
 import json
+import smbus2
+import math
 
 
 def runServer(flaskServer : server):
@@ -124,6 +127,35 @@ def socket_listener(port, aggregator,flaskServer):
     conn.close()
     print(f"[SERVER] Connection closed on port {port}")
 
+def receive_from_clients(method, aggregator, flaskServer, stop_event):
+    if method == 'wifi':
+        # Start socket listeners on specific ports
+        threading.Thread(target=socket_listener, args=(6001, aggregator, flaskServer), daemon=True).start()
+        threading.Thread(target=socket_listener, args=(6002, aggregator, flaskServer), daemon=True).start()
+    elif method == 'i2c':
+        # Placeholder for I2C logic
+        bus_pi2 = smbus2.SMBus(1)  # i2c-1: connected to client Pi 2
+        bus_pi3 = smbus2.SMBus(3)  # i2c-3: connected to client Pi 3
+        addr_pi2 = 0x08
+        addr_pi3 = 0x09
+        threading.Thread(target=i2c_listener, args=(bus_pi2,addr_pi2,"pi2",aggregator, flaskServer,stop_event), daemon=True).start()
+        threading.Thread(target=i2c_listener, args=(bus_pi3,addr_pi3,"pi3",aggregator, flaskServer,stop_event), daemon=True).start()
+
+def i2c_listener(bus,addr,client_id,aggregator, flaskServer,stop_event):
+        try:
+            while not stop_event.is_set():
+                data = bus.read_i2c_block_data(addr, 0, 12)
+                x, y, z = struct.unpack('<fff', bytes(data))
+                if any(math.isnan(v) for v in (x, y, z)):
+                    aggregator.remove_remote_pose(client_id)
+                else:
+                    aggregator.update_remote_pose(client_id, (x, y, z))
+                    x,y,z = aggregator.get_average_pose()
+                    flaskServer.updatePosition(x,y,z)
+                    
+        except Exception as e:
+            print(f"[I2C-{client_id}] Error: {e}")  
+                   
 def main():
 
     generate_aruco_board()
@@ -144,11 +176,12 @@ def main():
     
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     
-    # Start listener threads for clients
-    threading.Thread(target=socket_listener, args=(6001, aggregator,flaskServer), daemon=True).start()
-    threading.Thread(target=socket_listener, args=(6002, aggregator), daemon=True).start()
-    
     server_thread.start()
+    
+    # Choose communication method: 'wifi' or 'i2c'
+    communication_method = 'wifi'  # ← change to 'i2c' when needed
+    receive_from_clients(communication_method, aggregator, flaskServer, stop_event)
+    
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
