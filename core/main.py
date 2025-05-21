@@ -14,6 +14,7 @@ import socket
 import json
 import smbus2
 import math
+import select
 
 
 def runServer(flaskServer : server):
@@ -90,68 +91,85 @@ def generate_aruco_board():
         x, y, z = positions_m[marker_id]
         print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
 
-def socket_listener(port, aggregator,flaskServer):
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind(('', port))  # '' means listen on all network interfaces
-    server_socket.listen(1)
-    print(f"[SERVER] Listening on port {port}...")
+def multi_socket_listener(aggregator, flaskServer):
+    server_socket1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-    conn, addr = server_socket.accept()
-    print(f"[SERVER] Connected by {addr} on port {port}")
+    server_socket1.bind(('', 6001))
+    server_socket2.bind(('', 6002))
+
+    server_socket1.listen(1)
+    server_socket2.listen(1)
+
+    server_socket1.setblocking(False)
+    server_socket2.setblocking(False)
+
+    inputs = [server_socket1, server_socket2]
+    clients = {}
+
+    print("[SERVER] Waiting for client connections on ports 6001 and 6002...")
 
     while True:
-        try:
-            data = conn.recv(1024).decode()
-            if not data:
-                break
+        readable, _, _ = select.select(inputs, [], [])
+        for s in readable:
+            if s in [server_socket1, server_socket2]:
+                conn, addr = s.accept()
+                conn.setblocking(False)
+                inputs.append(conn)
+                clients[conn] = s.getsockname()[1]  # store which port it came from
+                print(f"[SERVER] Connection from {addr} on port {clients[conn]}")
+            else:
+                try:
+                    data = s.recv(1024).decode()
+                    if not data:
+                        inputs.remove(s)
+                        del clients[s]
+                        s.close()
+                        continue
 
-            pose_data = json.loads(data)
-            client_id = pose_data.get("client_id")
-            x, y, z = pose_data.get("x"), pose_data.get("y"), pose_data.get("z")
-            
-            if client_id is not None:
-                if x is not None and y is not None and z is not None:
-                    aggregator.update_remote_pose(client_id, (x, y, z))                
-                else:
-                    # Clear this client's pose
-                    aggregator.remove_remote_pose(client_id)
+                    pose_data = json.loads(data)
+                    client_id = pose_data.get("client_id")
+                    x, y, z = pose_data.get("x"), pose_data.get("y"), pose_data.get("z")
+
+                    if client_id is not None:
+                        if x is not None and y is not None and z is not None:
+                            aggregator.update_remote_pose(client_id, (x, y, z))
+                        else:
+                            aggregator.remove_remote_pose(client_id)
+
+                        x, y, z = aggregator.get_average_pose()
+                        flaskServer.updatePosition(x, y, z)
                 
-                x,y,z = aggregator.get_average_pose()
-                # Update server with smoothed average
-                flaskServer.updatePosition(x, y, z)
-
-        except Exception as e:
-            print(f"[ERROR] Socket on port {port}: {e}")
-            break
-
-    conn.close()
-    print(f"[SERVER] Connection closed on port {port}")
+                except Exception as e:
+                    print(f"[SERVER] Error handling socket: {e}")
+                    inputs.remove(s)
+                    del clients[s]
+                    s.close()
 
 def receive_from_clients(method, aggregator, flaskServer, stop_event):
     if method == 'wifi':
-        # Start socket listeners on specific ports
-        threading.Thread(target=socket_listener, args=(6001, aggregator, flaskServer), daemon=True).start()
-        threading.Thread(target=socket_listener, args=(6002, aggregator, flaskServer), daemon=True).start()
+        # Start a single thread to handle multiple socket connections using select
+        threading.Thread(target=multi_socket_listener, args=(aggregator, flaskServer), daemon=True).start()
     elif method == 'i2c':
         # Placeholder for I2C logic
         bus_pi2 = smbus2.SMBus(1)  # i2c-1: connected to client Pi 2
         bus_pi3 = smbus2.SMBus(3)  # i2c-3: connected to client Pi 3
         addr_pi2 = 0x08
         addr_pi3 = 0x09
-        threading.Thread(target=i2c_listener, args=(bus_pi2,addr_pi2,"pi2",aggregator, flaskServer,stop_event), daemon=True).start()
-        threading.Thread(target=i2c_listener, args=(bus_pi3,addr_pi3,"pi3",aggregator, flaskServer,stop_event), daemon=True).start()
+        threading.Thread(target=i2c_listener, args=([bus_pi2,bus_pi3],[addr_pi2,addr_pi3],["pi2","pi3"],aggregator, flaskServer,stop_event), daemon=True).start()
 
-def i2c_listener(bus,addr,client_id,aggregator, flaskServer,stop_event):
+def i2c_listener(buses,address,clients_id,aggregator, flaskServer,stop_event):
         try:
             while not stop_event.is_set():
-                data = bus.read_i2c_block_data(addr, 0, 12)
-                x, y, z = struct.unpack('<fff', bytes(data))
-                if any(math.isnan(v) for v in (x, y, z)):
-                    aggregator.remove_remote_pose(client_id)
-                else:
-                    aggregator.update_remote_pose(client_id, (x, y, z))
-                    x,y,z = aggregator.get_average_pose()
-                    flaskServer.updatePosition(x,y,z)
+                 for bus, addr, client_id in zip(buses, address, clients_id):
+                    data = bus.read_i2c_block_data(addr, 0, 12)
+                    x, y, z = struct.unpack('<fff', bytes(data))
+                    if any(math.isnan(v) for v in (x, y, z)):
+                        aggregator.remove_remote_pose(client_id)
+                    else:
+                        aggregator.update_remote_pose(client_id, (x, y, z))
+                        x,y,z = aggregator.get_average_pose()
+                        flaskServer.updatePosition(x,y,z)
                     
         except Exception as e:
             print(f"[I2C-{client_id}] Error: {e}")  
