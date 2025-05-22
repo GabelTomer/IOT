@@ -3,30 +3,24 @@ import threading
 class PoseAggregator:
     def __init__(self):
         self.lock = threading.Lock()
-        self.poses = {}  # key: client_id, value: (x, y, z)
-        self.main_pose = None  # the main Pi's pose
+        self.sum_x = 0.0
+        self.sum_y = 0.0
+        self.sum_z = 0.0
+        self.count = 0
 
-    def update_remote_pose(self, client_id, pose):
+    def update_pose(self, pose, count):
         with self.lock:
-            self.poses[client_id] = pose
-
-    def update_main_pose(self, pose):
-        with self.lock:
-            self.main_pose = pose
+            x, y, z = pose
+            self.sum_x += x
+            self.sum_y += y
+            self.sum_z += z
+            self.count += count
 
     def get_average_pose(self):
         with self.lock:
-            all_poses = list(self.poses.values())
-            if self.main_pose is not None:
-                all_poses.append(self.main_pose)
-            if not all_poses:
+            if self.count == 0:
                 return None
-            x, y, z = zip(*all_poses)
-            return (
-                sum(x) / len(x),
-                sum(y) / len(y),
-                sum(z) / len(z)
-            )
-    def remove_remote_pose(self, client_id):
-        with self.lock:
-            self.poses.pop(client_id, None)  # remove if exists, do nothing otherwise
+            avg_x = self.sum_x / self.count
+            avg_y = self.sum_y / self.count
+            avg_z = self.sum_z / self.count
+            return avg_x, avg_y, avg_z

@@ -16,6 +16,7 @@ import smbus2
 import math
 import select
 
+POSE_UPDATE_THRESHOLD = 5.0
 
 def runServer(flaskServer : server):
     
@@ -91,88 +92,103 @@ def generate_aruco_board():
         x, y, z = positions_m[marker_id]
         print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
 
-def multi_socket_listener(aggregator, flaskServer):
-    server_socket1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+def wifi_listener_enqueue(pose_queue, ports):
+    sockets = []
+    for port in ports:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(('', port))
+        sock.listen(1)
+        sock.setblocking(False)
+        sockets.append(sock)
+        print(f"[WIFI] Listening on port {port}")
 
-    server_socket1.bind(('', 6001))
-    server_socket2.bind(('', 6002))
-
-    server_socket1.listen(1)
-    server_socket2.listen(1)
-
-    server_socket1.setblocking(False)
-    server_socket2.setblocking(False)
-
-    inputs = [server_socket1, server_socket2]
-    clients = {}
-
-    print("[SERVER] Waiting for client connections on ports 6001 and 6002...")
+    inputs = sockets.copy()
 
     while True:
         readable, _, _ = select.select(inputs, [], [])
         for s in readable:
-            if s in [server_socket1, server_socket2]:
+            if s in sockets:
                 conn, addr = s.accept()
                 conn.setblocking(False)
                 inputs.append(conn)
-                clients[conn] = s.getsockname()[1]  # store which port it came from
-                print(f"[SERVER] Connection from {addr} on port {clients[conn]}")
+                print(f"[WIFI] Connected: {addr}")
             else:
                 try:
                     data = s.recv(1024).decode()
                     if not data:
                         inputs.remove(s)
-                        del clients[s]
                         s.close()
                         continue
-
                     pose_data = json.loads(data)
-                    client_id = pose_data.get("client_id")
-                    x, y, z = pose_data.get("x"), pose_data.get("y"), pose_data.get("z")
-
-                    if client_id is not None:
-                        if x is not None and y is not None and z is not None:
-                            aggregator.update_remote_pose(client_id, (x, y, z))
-                        else:
-                            aggregator.remove_remote_pose(client_id)
-
-                        x, y, z = aggregator.get_average_pose()
-                        flaskServer.updatePosition(x, y, z)
-                
+                    x = pose_data.get("x")
+                    y = pose_data.get("y")
+                    z = pose_data.get("z")
+                    if None not in (x, y, z):
+                        pose_queue.put((x, y, z))
                 except Exception as e:
-                    print(f"[SERVER] Error handling socket: {e}")
+                    print(f"[WIFI] Error: {e}")
                     inputs.remove(s)
-                    del clients[s]
                     s.close()
+
+def wifi_processor_dequeue(pose_queue, aggregator, flaskServer):
+    while True:
+        total_x = total_y = total_z = 0.0
+        count = 0
+        while not pose_queue.empty():
+            x, y, z = pose_queue.get()
+            total_x += x
+            total_y += y
+            total_z += z
+            count += 1
+        if count > 0:
+            aggregator.update_pose((total_x, total_y, total_z), count)
+            pose = aggregator.get_average_pose()
+            if pose:
+                x, y, z = pose
+                flaskServer.updatePosition(x, y, z)
 
 def receive_from_clients(method, aggregator, flaskServer, stop_event):
     if method == 'wifi':
-        # Start a single thread to handle multiple socket connections using select
-        threading.Thread(target=multi_socket_listener, args=(aggregator, flaskServer), daemon=True).start()
+        pose_queue = queue.Queue()
+        ports = [6001, 6002]
+        threading.Thread(target=wifi_listener_enqueue, args=(pose_queue, ports), daemon=True).start()
+        threading.Thread(target=wifi_processor_dequeue, args=(pose_queue, aggregator, flaskServer), daemon=True).start()
     elif method == 'i2c':
-        # Placeholder for I2C logic
-        bus_pi2 = smbus2.SMBus(1)  # i2c-1: connected to client Pi 2
-        bus_pi3 = smbus2.SMBus(3)  # i2c-3: connected to client Pi 3
+        bus_pi2 = smbus2.SMBus(1)
+        bus_pi3 = smbus2.SMBus(3)
         addr_pi2 = 0x08
         addr_pi3 = 0x09
-        threading.Thread(target=i2c_listener, args=([bus_pi2,bus_pi3],[addr_pi2,addr_pi3],["pi2","pi3"],aggregator, flaskServer,stop_event), daemon=True).start()
+        threading.Thread(target=i2c_listener, args=([bus_pi2, bus_pi3], [addr_pi2, addr_pi3], aggregator, flaskServer, stop_event), daemon=True).start()
 
-def i2c_listener(buses,address,clients_id,aggregator, flaskServer,stop_event):
-        try:
-            while not stop_event.is_set():
-                 for bus, addr, client_id in zip(buses, address, clients_id):
-                    data = bus.read_i2c_block_data(addr, 0, 12)
-                    x, y, z = struct.unpack('<fff', bytes(data))
-                    if any(math.isnan(v) for v in (x, y, z)):
-                        aggregator.remove_remote_pose(client_id)
-                    else:
-                        aggregator.update_remote_pose(client_id, (x, y, z))
-                        x,y,z = aggregator.get_average_pose()
-                        flaskServer.updatePosition(x,y,z)
-                    
-        except Exception as e:
-            print(f"[I2C-{client_id}] Error: {e}")  
+def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
+    try:
+        time_diff = 0.0
+        while not stop_event.is_set():
+            total_x = total_y = total_z = 0.0
+            count = 0
+            for bus, addr in zip(buses, address):
+                try:
+                    data = bus.read_i2c_block_data(addr, 0, 16)
+                    x, y, z, timestamp = struct.unpack('<ffff', bytes(data))
+                    time_diff = (time.time() - timestamp) * 1_000_000
+                    if not any(math.isnan(v) for v in (x, y, z)) and time_diff <= POSE_UPDATE_THRESHOLD:
+                        total_x += x
+                        total_y += y
+                        total_z += z
+                        count += 1
+                        
+                except Exception as e:
+                    print(f"[I2C addr {hex(addr)}] Read error: {e}")
+
+            if count > 0:
+                aggregator.update_pose((total_x, total_y, total_z), count)
+                pose = aggregator.get_average_pose()
+                if pose:
+                    x, y, z = pose
+                    flaskServer.updatePosition(x, y, z)
+
+    except Exception as e:
+        print(f"[I2C Listener] Fatal error: {e}")
                    
 def main():
 
@@ -197,7 +213,7 @@ def main():
     server_thread.start()
     
     # Choose communication method: 'wifi' or 'i2c'
-    communication_method = 'wifi'  # ← change to 'i2c' when needed
+    communication_method = 'i2c'  # ← change to 'i2c' when needed
     receive_from_clients(communication_method, aggregator, flaskServer, stop_event)
     
     video = cv2.VideoCapture(0)
@@ -288,12 +304,14 @@ def main():
                         filtered_pos = predicted[:3]
                 
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
-                aggregator.update_main_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]))
-                x,y,z = aggregator.get_average_pose()
-                # Update server with smoothed average
-                flaskServer.updatePosition(x, y, z)
-                #print Average Camera Position
-                print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
+                aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]),1)
+                pose = aggregator.get_average_pose()
+                if pose is not None:
+                    x,y,z = pose
+                    # Update server with smoothed average
+                    flaskServer.updatePosition(x, y, z)
+                    #print Average Camera Position
+                    print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
     
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
