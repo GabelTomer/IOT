@@ -131,16 +131,15 @@ def wifi_listener_enqueue(pose_queue, ports):
                     s.close()
 
 def wifi_processor_dequeue(pose_queue, aggregator, flaskServer):
+    total_x = total_y = total_z = 0.0
+    count = 0
     while True:
-        total_x = total_y = total_z = 0.0
-        count = 0
-        while not pose_queue.empty():
+        if not pose_queue.empty():
             x, y, z = pose_queue.get()
             total_x += x
             total_y += y
             total_z += z
             count += 1
-        if count > 0:
             aggregator.update_pose((total_x, total_y, total_z), count)
             pose = aggregator.get_average_pose()
             if pose:
@@ -163,9 +162,9 @@ def receive_from_clients(method, aggregator, flaskServer, stop_event):
 def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
     try:
         time_diff = 0.0
+        total_x = total_y = total_z = 0.0
+        count = 0
         while not stop_event.is_set():
-            total_x = total_y = total_z = 0.0
-            count = 0
             for bus, addr in zip(buses, address):
                 try:
                     data = bus.read_i2c_block_data(addr, 0, 16)
@@ -186,6 +185,8 @@ def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
                 if pose:
                     x, y, z = pose
                     flaskServer.updatePosition(x, y, z)
+            
+            time.sleep(0.001)
 
     except Exception as e:
         print(f"[I2C Listener] Fatal error: {e}")
@@ -315,7 +316,6 @@ def main():
     
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
-                aggregator.update_main_pose(None)
                 
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
