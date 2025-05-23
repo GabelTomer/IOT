@@ -14,11 +14,10 @@ class SimpleI2CSlave:
 
     def listen_and_respond(self, data_bytes):
         try:
-            while True:
-                status, bytes_read, rx_data = self.pi.bsc_i2c(self.address)
-                if bytes_read > 0:
-                    print(f"Received: {rx_data}")
-                    self.pi.bsc_i2c(self.address, data_bytes)
+            status, bytes_read, rx_data = self.pi.bsc_i2c(self.address)
+            if bytes_read > 0:
+                print(f"Received: {rx_data}")
+                self.pi.bsc_i2c(self.address, data_bytes)
         except KeyboardInterrupt:
             self.close()
 

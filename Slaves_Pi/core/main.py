@@ -9,14 +9,12 @@ import random
 import socket
 import json
 from communication.i2c_slave_emulated import SimpleI2CSlave
+import threading
 
 # --- GLOBAL Variables --- 
-RASPBERRY_ID = 1 #right camera
 HOST = ""
 PORT = 6002
 SLAVE_ADDRESS = 0x08
-SDA = 4
-SCL = 5
 POSITION = "Right"
 
 CAMERA_ROTATION_DEG = 90  # or any angle
@@ -28,7 +26,23 @@ R_to_main = np.array([
     [-np.sin(theta), 0, np.cos(theta)]
 ])
 
-slave = SimpleI2CSlave(SDA, SCL, SLAVE_ADDRESS)
+payload_lock = threading.Lock()
+payload = struct.pack('<ffff', 0.0, 0.0, 0.0, time.time())
+slave = SimpleI2CSlave(SLAVE_ADDRESS)
+
+def slave_listener():
+    global payload
+    try:
+        while True:
+            with payload_lock:
+                response = payload
+            status, bytes_read, rx_data = slave.pi.bsc_i2c(slave.address)
+            if bytes_read > 0:
+                print(f"[I2C] Master requested data: {rx_data}")
+                slave.pi.bsc_i2c(slave.address, response)
+            #time.sleep(0.01)
+    except KeyboardInterrupt:
+        slave.close()
 
 def generate_aruco_board():
     # Constants
@@ -111,16 +125,7 @@ def send_pose(method, pose):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.connect((HOST, PORT))
             sock.sendall(json.dumps(pose_packet).encode('utf-8'))
-   
-    elif method == "i2c":
-        try:
-            timestamp = time.time()
-            payload = struct.pack('<ffff', x, y, z, timestamp)
-            slave.listen_and_respond(payload)
-            
-        except Exception as e:
-            print(e)
-            
+
 def main():
 
     generate_aruco_board()
@@ -137,7 +142,9 @@ def main():
     
     # Choose communication method: 'wifi' or 'i2c'
     communication_method = 'i2c'  # ← change to 'i2c' when needed
-    
+    if communication_method == 'i2c':
+        threading.Thread(target=slave_listener, daemon=True).start()
+        
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
@@ -232,9 +239,12 @@ def main():
                 else:  # Center Pi
                     pose_global = filtered_pos.flatten()
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
+                with payload_lock:
+                    global payload
+                    payload = struct.pack('<ffff', pose_global[0], pose_global[1], pose_global[2], time.time())
                 send_pose(communication_method, tuple(pose_global))
                 #print Average Camera Position
-                print(f"Filtered Camera Position -> X: {filtered_pos[0][0]:.2f}, Y: {filtered_pos[1][0]:.2f}, Z: {filtered_pos[2][0]:.2f}")
+                print(f"Filtered Camera Position -> X: {pose_global[0]:.2f}, Y: {pose_global[1]:.2f}, Z: {pose_global[2]:.2f}")
     
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
