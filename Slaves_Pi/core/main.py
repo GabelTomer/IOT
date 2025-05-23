@@ -17,18 +17,13 @@ PORT = 6002
 SLAVE_ADDRESS = 0x08
 POSITION = "Right"
 
-# Right Pi (90° around Y)
-R_right_to_main = np.array([
-    [0, 0, -1],
-    [0, 1,  0],
-    [1, 0,  0]
-])
+CAMERA_ROTATION_DEG = 90  # or any angle
+theta = np.radians(CAMERA_ROTATION_DEG)
 
-# Left Pi (-90° around Y)
-R_left_to_main = np.array([
-    [ 0, 0, 1],
-    [ 0, 1, 0],
-    [-1, 0, 0]
+R_to_main = np.array([
+    [ np.cos(theta), 0, np.sin(theta)],
+    [ 0,             1, 0            ],
+    [-np.sin(theta), 0, np.cos(theta)]
 ])
 
 pi = pigpio.pi()
@@ -226,9 +221,9 @@ def main():
                         filtered_pos = predicted[:3]
                         
                 if POSITION == "Right":
-                    pose_global = (R_right_to_main @ filtered_pos).flatten()
+                    pose_global = (R_to_main @ filtered_pos).flatten()
                 elif POSITION == "Left":
-                    pose_global = (R_left_to_main @ filtered_pos).flatten()
+                    pose_global = (R_to_main @ filtered_pos).flatten()
                 else:  # Center Pi
                     pose_global = filtered_pos.flatten()
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
