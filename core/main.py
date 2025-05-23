@@ -170,6 +170,7 @@ def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
                     data = bus.read_i2c_block_data(addr, 0, 16)
                     x, y, z, timestamp = struct.unpack('<ffff', bytes(data))
                     time_diff = (time.time() - timestamp) * 1_000_000
+                    print(time_diff)
                     if not any(math.isnan(v) for v in (x, y, z)) and time_diff <= POSE_UPDATE_THRESHOLD:
                         total_x += x
                         total_y += y
@@ -185,6 +186,7 @@ def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
                 if pose:
                     x, y, z = pose
                     flaskServer.updatePosition(x, y, z)
+                    print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
             
             time.sleep(0.001)
 
