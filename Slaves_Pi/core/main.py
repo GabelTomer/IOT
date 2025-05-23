@@ -15,6 +15,21 @@ RASPBERRY_ID = 1 #right camera
 HOST = ""
 PORT = 6002
 SLAVE_ADDRESS = 0x08
+POSITION = "Right"
+
+# Right Pi (90° around Y)
+R_right_to_main = np.array([
+    [0, 0, -1],
+    [0, 1,  0],
+    [1, 0,  0]
+])
+
+# Left Pi (-90° around Y)
+R_left_to_main = np.array([
+    [ 0, 0, 1],
+    [ 0, 1, 0],
+    [-1, 0, 0]
+])
 
 pi = pigpio.pi()
 handle = pi.i2c_slave_create(SLAVE_ADDRESS)
@@ -209,9 +224,15 @@ def main():
                         kalman.correct(measured)
                         predicted = kalman.predict()
                         filtered_pos = predicted[:3]
-                
+                        
+                if POSITION == "Right":
+                    pose_global = (R_right_to_main @ filtered_pos).flatten()
+                elif POSITION == "Left":
+                    pose_global = (R_left_to_main @ filtered_pos).flatten()
+                else:  # Center Pi
+                    pose_global = filtered_pos.flatten()
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
-                send_pose(communication_method, (filtered_pos[0][0], filtered_pos[1][0], filtered_pos[2][0]))
+                send_pose(communication_method, tuple(pose_global))
                 #print Average Camera Position
                 print(f"Filtered Camera Position -> X: {filtered_pos[0][0]:.2f}, Y: {filtered_pos[1][0]:.2f}, Z: {filtered_pos[2][0]:.2f}")
     
