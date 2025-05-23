@@ -245,8 +245,7 @@ def main():
 
     cv2.destroyAllWindows()
     if communication_method == "i2c":
-        pi.i2c_slave_delete(handle)
-        pi.stop()
+        slave.close()
 
 if __name__ == "__main__":
     main()
