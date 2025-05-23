@@ -8,13 +8,15 @@ import sys
 import random
 import socket
 import json
-import pigpio
+from communication.i2c_slave_emulated import SimpleI2CSlave
 
 # --- GLOBAL Variables --- 
 RASPBERRY_ID = 1 #right camera
 HOST = ""
 PORT = 6002
 SLAVE_ADDRESS = 0x08
+SDA = 4
+SCL = 5
 POSITION = "Right"
 
 CAMERA_ROTATION_DEG = 90  # or any angle
@@ -26,8 +28,7 @@ R_to_main = np.array([
     [-np.sin(theta), 0, np.cos(theta)]
 ])
 
-pi = pigpio.pi()
-handle = pi.i2c_slave_create(SLAVE_ADDRESS)
+slave = SimpleI2CSlave(SDA, SCL, SLAVE_ADDRESS)
 
 def generate_aruco_board():
     # Constants
@@ -112,9 +113,13 @@ def send_pose(method, pose):
             sock.sendall(json.dumps(pose_packet).encode('utf-8'))
    
     elif method == "i2c":
-        timestamp = time.time()
-        payload = struct.pack('<ffff', x, y, z, timestamp)
-        pi.i2c_slave_write(handle, payload)
+        try:
+            timestamp = time.time()
+            payload = struct.pack('<ffff', x, y, z, timestamp)
+            slave.listen_and_respond(payload)
+            
+        except Exception as e:
+            print(e)
             
 def main():
 
