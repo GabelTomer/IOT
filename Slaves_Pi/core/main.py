@@ -35,12 +35,16 @@ def slave_listener(stop_event):
         while not stop_event.is_set():
             with payload_lock:
                 response = payload
-                print("[SLAVE] Sending bytes:", response.hex())  # HEX is easiest to debug
+                
             status, bytes_read, rx_data = slave.pi.bsc_i2c(slave.address)
-            if bytes_read > 0:
-                slave.pi.bsc_i2c(slave.address, response)
-
             
+            if status & 0x01:  # If master is reading from us
+                slave.pi.bsc_i2c(slave.address, response)
+                print("[SLAVE] Sending bytes:", response.hex())
+                print("[I2C] Master read detected → sent payload")
+            
+            time.sleep(0.001)
+
     except KeyboardInterrupt:
         slave.close()
 
