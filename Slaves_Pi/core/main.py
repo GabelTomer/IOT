@@ -15,7 +15,6 @@ import threading
 HOST = ""
 PORT = 6002
 SLAVE_ADDRESS = 0x08
-POSITION = "Right"
 
 CAMERA_ROTATION_DEG = 90  # or any angle
 theta = np.radians(CAMERA_ROTATION_DEG)
@@ -27,7 +26,7 @@ R_to_main = np.array([
 ])
 
 payload_lock = threading.Lock()
-payload = struct.pack('<ffff', 0.0, 0.0, 0.0, time.time())
+payload = struct.pack('<fffQ', 1.0, 2.0, 4.0, (time.time_ns() // 1000))
 slave = SimpleI2CSlave(SLAVE_ADDRESS)
 
 def slave_listener(stop_event):
@@ -36,10 +35,12 @@ def slave_listener(stop_event):
         while not stop_event.is_set():
             with payload_lock:
                 response = payload
+                print("[SLAVE] Sending bytes:", response.hex())  # HEX is easiest to debug
             status, bytes_read, rx_data = slave.pi.bsc_i2c(slave.address)
             if bytes_read > 0:
                 slave.pi.bsc_i2c(slave.address, response)
-            #time.sleep(0.01)
+
+            
     except KeyboardInterrupt:
         slave.close()
 
@@ -142,7 +143,7 @@ def main():
     # Choose communication method: 'wifi' or 'i2c'
     communication_method = 'i2c'  # ← change to 'i2c' when needed
     if communication_method == 'i2c':
-        threading.Thread(target=slave_listener,args=(stop_event), daemon=True).start()
+        threading.Thread(target=slave_listener,args=(stop_event,), daemon=True).start()
         
     video = cv2.VideoCapture(0)
     if not video.isOpened():
@@ -231,22 +232,19 @@ def main():
                         predicted = kalman.predict()
                         filtered_pos = predicted[:3]
                         
-                if POSITION == "Right":
-                    pose_global = (R_to_main @ filtered_pos).flatten()
-                elif POSITION == "Left":
-                    pose_global = (R_to_main @ filtered_pos).flatten()
-                else:  # Center Pi
-                    pose_global = filtered_pos.flatten()
+                pose_global = (R_to_main @ filtered_pos).flatten()
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
                 with payload_lock:
                     global payload
-                    payload = struct.pack('<ffff', pose_global[0], pose_global[1], pose_global[2], time.time())
+                    payload = struct.pack('<fffQ', pose_global[0], pose_global[1], pose_global[2], (time.time_ns() // 1000))
                 send_pose(communication_method, tuple(pose_global))
                 #print Average Camera Position
                 print(f"Filtered Camera Position -> X: {pose_global[0]:.2f}, Y: {pose_global[1]:.2f}, Z: {pose_global[2]:.2f}")
     
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
+                with payload_lock:
+                    payload = struct.pack('<fffQ', 0.0, 0.0, 0.0, (time.time_ns() // 1000))
                 
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):

@@ -16,7 +16,7 @@ import smbus2
 import math
 import select
 
-POSE_UPDATE_THRESHOLD = 5.0
+POSE_UPDATE_THRESHOLD = 10000.0
 
 def runServer(flaskServer : server):
     
@@ -167,10 +167,14 @@ def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
         while not stop_event.is_set():
             for bus, addr in zip(buses, address):
                 try:
-                    data = bus.read_i2c_block_data(addr, 0, 16)
-                    x, y, z, timestamp = struct.unpack('<ffff', bytes(data))
-                    time_diff = (time.time() - timestamp) * 1_000_000
-                    print(f"the time diff is : {time_diff}")
+                    data = bus.read_i2c_block_data(addr, 0, 20)
+                    print("[MASTER] Received:", bytes(data).hex(), len(data))
+                    x, y, z, timestamp = struct.unpack('<fffQ', bytes(data))
+                    print("[MASTER] Timestamp received:", timestamp)
+                    print("[MASTER] Current time      :", time.time_ns() // 1000)
+                    print("[MASTER] Time diff (μs)    :", (time.time_ns() // 1000) - timestamp)
+                    time_now = time.time_ns() // 1000
+                    time_diff = time_now - timestamp
                     if not any(math.isnan(v) for v in (x, y, z)) and time_diff <= POSE_UPDATE_THRESHOLD:
                         total_x += x
                         total_y += y
@@ -188,7 +192,7 @@ def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
                     flaskServer.updatePosition(x, y, z)
                     print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
             
-            time.sleep(0.001)
+            time.sleep(0.0035)
 
     except Exception as e:
         print(f"[I2C Listener] Fatal error: {e}")
