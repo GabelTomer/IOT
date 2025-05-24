@@ -170,7 +170,7 @@ def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
                     data = bus.read_i2c_block_data(addr, 0, 16)
                     x, y, z, timestamp = struct.unpack('<ffff', bytes(data))
                     time_diff = (time.time() - timestamp) * 1_000_000
-                    print(time_diff)
+                    print(f"the time diff is : {time_diff}")
                     if not any(math.isnan(v) for v in (x, y, z)) and time_diff <= POSE_UPDATE_THRESHOLD:
                         total_x += x
                         total_y += y

@@ -4,7 +4,7 @@ import struct
 
 # Respond with the same 16-byte payload
 class SimpleI2CSlave:
-    def __init__(self, sda, scl, address):
+    def __init__(self, address):
         self.pi = pigpio.pi()
         if not self.pi.connected:
             raise Exception("Cannot connect to pigpiod")

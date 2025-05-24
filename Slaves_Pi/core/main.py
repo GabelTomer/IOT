@@ -30,15 +30,14 @@ payload_lock = threading.Lock()
 payload = struct.pack('<ffff', 0.0, 0.0, 0.0, time.time())
 slave = SimpleI2CSlave(SLAVE_ADDRESS)
 
-def slave_listener():
+def slave_listener(stop_event):
     global payload
     try:
-        while True:
+        while not stop_event.is_set():
             with payload_lock:
                 response = payload
             status, bytes_read, rx_data = slave.pi.bsc_i2c(slave.address)
             if bytes_read > 0:
-                print(f"[I2C] Master requested data: {rx_data}")
                 slave.pi.bsc_i2c(slave.address, response)
             #time.sleep(0.01)
     except KeyboardInterrupt:
@@ -139,11 +138,11 @@ def main():
             recalibrate = True
         
     detector = Detection(known_markers_path="core/utils/known_markers.json")
-    
+    stop_event = threading.Event()
     # Choose communication method: 'wifi' or 'i2c'
     communication_method = 'i2c'  # ← change to 'i2c' when needed
     if communication_method == 'i2c':
-        threading.Thread(target=slave_listener, daemon=True).start()
+        threading.Thread(target=slave_listener,args=(stop_event), daemon=True).start()
         
     video = cv2.VideoCapture(0)
     if not video.isOpened():
@@ -251,6 +250,7 @@ def main():
                 
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
+                stop_event.set()  # <<<<<< Tell all threads to stop
                 break
 
     cv2.destroyAllWindows()
