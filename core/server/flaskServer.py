@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request
 import json
 import threading
+import time
 
 class server:
     def __init__(self,  port = 5000, known_markers_path=None, detector=None):
@@ -128,9 +129,9 @@ class server:
         
         @self.app.route('/get_position')
         def get_position():
-
-            # Example position data
-            return jsonify(self.getPos())
+            dataToSend = self.getPos()
+            dataToSend["timestamp"] = time.time()
+            return jsonify(dataToSend)
         
         @self.app.route('/add_marker', methods=['POST'])
         def add_marker():

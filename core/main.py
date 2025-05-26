@@ -1,5 +1,4 @@
 import threading
-import queue
 import cv2
 import time
 import numpy as np
@@ -8,7 +7,50 @@ from detection import Detection
 import sys
 from server.flaskServer import server
 import random
+import asyncio
+import aiohttp
+import threading
 
+async def compute_average(session, flaskServer, ip, direction):
+    MAX_ALLOWED_AGE = 0.2  # seconds, adjust as needed
+    try:
+        async with session.get(f"http://{ip}:5000/get_position", timeout=2) as response:
+            if response.status == 200:
+                data = await response.json()
+                x = data.get("x", 0)
+                y = data.get("y", 0)
+                z = data.get("z", 0)
+                timeStamp = data.get("timestamp", 0)
+                if time.time() - timeStamp < MAX_ALLOWED_AGE:
+                    oldData = flaskServer.getPosition()
+                    if oldData is not None:
+                        x = (x + oldData['x']) / 2
+                        y = (y + oldData['y']) / 2
+                        z = (z + oldData['z']) / 2
+                        flaskServer.updatePosition(x, y, z)
+    except aiohttp.ClientError as e:
+        print(f"Error fetching position from {direction} server: {e}")
+    except asyncio.TimeoutError:
+        print(f"Timeout when fetching from {direction} server.")
+
+async def averaging_loop(flaskServer):
+    ip_left = "192.168.2.2"
+    ip_right = "192.168.3.2"
+
+    async with aiohttp.ClientSession() as session:
+        while True:
+            await asyncio.gather(
+                compute_average(session, flaskServer, ip_left, "left"),
+                compute_average(session, flaskServer, ip_right, "right")
+            )
+            await asyncio.sleep(0.1)
+
+def start_averaging_loop_in_thread(flaskServer):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(averaging_loop(flaskServer))
+        
+            
 
 def runServer(flaskServer : server):
     
@@ -85,11 +127,6 @@ def generate_aruco_board():
         x, y, z = positions_m[marker_id]
         print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
 
-def resource_path(relative_path):
-    import sys, os
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.abspath(relative_path)
 
 def main():
 
@@ -111,6 +148,9 @@ def main():
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     
     server_thread.start()
+    averaging_thread =  threading.Thread(target=start_averaging_loop_in_thread, args=(flaskServer,), daemon=True)
+    averaging_thread.start()
+
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
@@ -169,6 +209,7 @@ def main():
 
     #Now wait for all threads to end
     server_thread.join()
+    averaging_thread.join()
 
 if __name__ == "__main__":
     main()
