@@ -1,5 +1,4 @@
 import threading
-import struct
 import cv2
 import time
 import numpy as np
@@ -8,160 +7,53 @@ from detection import Detection
 import sys
 from communication.pose_aggregator import PoseAggregator
 from server.flaskServer import server
-import matplotlib.pyplot as plt
-import pandas as pd
-import os
-import matplotlib.patheffects as pe
+import random
+import asyncio
+import aiohttp
+import threading
 
-# --- General GLOBAL Variables --- 
-POSE_UPDATE_THRESHOLD = 20000.0
-GENERATE_ARUCO_BOARD = False
-COMMUNICATION_METHOD = 'wifi'  # change to 'WiFi or i2c' when needed
-
-# --- GLOBAL Variables and Import specific Libraries for I2C ---
-if COMMUNICATION_METHOD == 'i2c':
-    import RPi.GPIO as GPIO
-    import smbus2
-    
-    SLAVE_CONFIG = {
-    0x08: 18,  # GPIO pin for Pi2 interrupt
-    0x09: 19,  # GPIO pin for Pi3 interrupt
-    }
-    # GPIO setup and interrupt handling for data ready (per slave)
-    GPIO.setmode(GPIO.BCM)
-    ready_flags = {}
-
-# --- GLOBAL Variables and Import specific Libraries for WiFi ---
-elif COMMUNICATION_METHOD == "wifi":
-    import socket
-    import queue
-
-
-# --- GLOBAL Variables and Intialization of 3D Visulaization ---
-plot_lock = threading.Lock()
-fig = plt.figure()
-ax = fig.add_subplot(111, projection = '3d')
-poses_log = []
-plt.ion()
-combined_aruco_ids = set()
-aruco_ids = []
-aruco_ids_lock = threading.Lock()
-known_markers = {}
-MAX_LOG_LEN = 500
-
-# --- GLOBAL Variables and Import specific Libraries for WiFi ---
-elif COMMUNICATION_METHOD == "wifi":
-    import socket
-    import queue
-
-
-# --- GLOBAL Variables and Intialization of 3D Visulaization ---
-plot_lock = threading.Lock()
-
-combined_aruco_ids = set()
-aruco_ids = []
-aruco_ids_lock = threading.Lock()
-known_markers = {}
-
-_gui_available = None
-
-def is_gui_available():
-    """
-    Check if the script can display a GUI.
-    This is the most reliable method and works on all platforms.
-    """
-    global _gui_available
-    if _gui_available is None:
-        try:
-            # Create a named window
-            cv2.namedWindow("test_window", cv2.WINDOW_NORMAL)
-            # Attempt to move it
-            cv2.moveWindow("test_window", 100, 100)
-            # Destroy it immediately
-            cv2.destroyWindow("test_window")
-            _gui_available = True
-            print("GUI is available.")
-        except cv2.error:
-            _gui_available = False
-            print("GUI is not available (running in a headless environment or as a service).")
-    return _gui_available
-
-def make_callback(addr):
-    global ready_flags
-    def callback(channel):
-        ready_flags[addr].set()
-    return callback
-
-def plot_updater_thread(aggregator, stop_event):
-    global aruco_ids,combined_aruco_ids
-    while not stop_event.is_set():
-        pose = aggregator.get_average_pose()
-        # Update global set
-        with aruco_ids_lock:
-            aruco_ids = list(combined_aruco_ids)
-
-        # Call your visual update with all seen markers
-        update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_ids)
-        time.sleep(0.02)
-            
-def update_pose_visual_and_stats(title, pose, markers = None, color = 'b', marker = 'o'):
-    global known_markers, fig, ax, poses_log
-    x, y, z = pose
-
-    # Keep history for statistics, but don't plot it all
-    if len(poses_log) > MAX_LOG_LEN:
-        poses_log.pop(0)
-    poses_log.append((x, y, z))
-
-    ax.cla()
-    ax.set_title(title)
-    ax.set_xlim(-1, 1)
-    ax.set_ylim(-1, 1)
-    ax.set_zlim(-2, 2)
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-
-    # Plot only the current pose
-    ax.scatter([x], [y], [z], c=color, marker=marker)
-
-    # Draw lines from each detected ArUco marker center to the current pose
-    if markers is not None:
-        for marker in markers:
-            cx, cy, cz = known_markers[str(marker)]
-            dx, dy, dz = x - cx, y - cy, z - cz
-            ax.quiver(cx, cy, cz, dx, dy, dz, color = 'r', arrow_length_ratio = 0.05)
-
-    # Overlay statistics
+async def compute_average(session, flaskServer, ip, direction):
+    MAX_ALLOWED_AGE = 0.2  # seconds, adjust as needed
     try:
-        if len(poses_log) > 1:
-            df = pd.DataFrame(poses_log, columns=["X", "Y", "Z"])
-            mean = df.mean()
-            std = df.std()
-            stats_text = (
-                f"Mean: ({mean['X']:.2f}, {mean['Y']:.2f}, {mean['Z']:.2f})\n"
-                f"Std:  ({std['X']:.2f}, {std['Y']:.2f}, {std['Z']:.2f})"
+        async with session.get(f"http://{ip}:5000/get_position", timeout=2) as response:
+            if response.status == 200:
+                data = await response.json()
+                x = data.get("x", 0)
+                y = data.get("y", 0)
+                z = data.get("z", 0)
+                timeStamp = data.get("timestamp", 0)
+                if time.time() - timeStamp < MAX_ALLOWED_AGE:
+                    oldData = flaskServer.getPosition()
+                    if oldData is not None:
+                        x = (x + oldData['x']) / 2
+                        y = (y + oldData['y']) / 2
+                        z = (z + oldData['z']) / 2
+                        flaskServer.updatePosition(x, y, z)
+    except aiohttp.ClientError as e:
+        print(f"Error fetching position from {direction} server: {e}")
+    except asyncio.TimeoutError:
+        print(f"Timeout when fetching from {direction} server.")
+
+async def averaging_loop(flaskServer):
+    ip_left = "192.168.2.2"
+    ip_right = "192.168.3.2"
+
+    async with aiohttp.ClientSession() as session:
+        while True:
+            await asyncio.gather(
+                compute_average(session, flaskServer, ip_left, "left"),
+                compute_average(session, flaskServer, ip_right, "right")
             )
-            ax.text2D(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=8,
-                    verticalalignment ='top', bbox=dict(boxstyle = "round", fc = "w"),
-                    path_effects=[pe.withStroke(linewidth=1, foreground = "black")])
-            
-            # Save statistics to CSV
-            try:
-                if len(poses_log) > 1:
-                    df.tail(1).to_csv("pose_statistics_log.csv", mode = 'a', header = not os.path.exists("pose_statistics_log.csv"), index = False)
-            
-            except Exception as e:
-                print("[Plot Error] Failed to save stats to CSV:", e)
-            
-    except Exception as e:
-        print("[Plot Error] Failed to compute stats overlay:", e)
+            await asyncio.sleep(0.1)
 
-    
-    fig.canvas.draw()
-    fig.canvas.flush_events()
+def start_averaging_loop_in_thread(flaskServer):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(averaging_loop(flaskServer))
+        
+            
 
-def runServer(flaskServer: server):
+def runServer(flaskServer : server):
     
     flaskServer.setup_routes()
     flaskServer.run()
@@ -240,154 +132,7 @@ def generate_aruco_board():
         x, y, z = positions_m[marker_id]
         print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
 
-def wifi_listener_enqueue(pose_queue, port, stop_event):
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('', port))
-    print(f"[UDP] Listening on port {port}")
 
-    while not stop_event.is_set():
-        try:
-            data, addr = sock.recvfrom(512)
-            # Unpack header + pose + timestamp + aruco_list
-            if data[0:3] == b'\xFA\xF3\x20':
-                x, y, z , timestamp = struct.unpack('<3fQ', data[3:23])
-
-                # Get ArUco list
-                aruco_list = list(data[23:])  # remaining bytes are ArUco IDs
-
-                # Push to queue
-                pose_queue.put((x, y, z, timestamp, aruco_list))
-
-        except Exception as e:
-            print(f"[UDP Listener] Error: {e}")
-
-def resource_path(relative_path):
-    import sys, os
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.abspath(relative_path)
-
-def kalman_filter_config():
-    # === Kalman Filter Configuration ===
-    kalman = cv2.KalmanFilter(6, 3)  # 6 state variables (pos + velocity), 3 measurements (pos only)
-    # Transition matrix (state update: x = Ax + Bu + w)
-    kalman.transitionMatrix = np.array([
-        [1, 0, 0, 1, 0, 0],  # x
-        [0, 1, 0, 0, 1, 0],  # y
-        [0, 0, 1, 0, 0, 1],  # z
-        [0, 0, 0, 1, 0, 0],  # vx
-        [0, 0, 0, 0, 1, 0],  # vy
-        [0, 0, 0, 0, 0, 1]   # vz
-    ], dtype=np.float32)
-
-    #Measurement matrix (we only measure position)
-    kalman.measurementMatrix = np.eye(3, 6, dtype=np.float32)
-    kalman.processNoiseCov = np.eye(6, dtype=np.float32) * 1e-4
-    kalman.measurementNoiseCov = np.eye(3, dtype=np.float32) * 1e-2
-    kalman.errorCovPost = np.eye(6, dtype=np.float32)
-    
-    # Initial state (0 position, 0 velocity)
-    kalman.statePost = np.zeros((6, 1), dtype=np.float32)
-    return kalman
-
-def wifi_processor_dequeue(pose_queue, aggregator, flaskServer, stop_event):
-    while not stop_event.is_set():
-        if not pose_queue.empty():
-            x, y, z, timestamp, aruco_list = pose_queue.get()
-            aggregator.update_pose((x, y, z))
-            pose = aggregator.get_average_pose()
-            time_now = time.time_ns() // 1000
-            if pose and  0 <= (time_now - timestamp) <= POSE_UPDATE_THRESHOLD:
-                x, y, z = pose
-                flaskServer.updatePosition(x, y, z)
-                with aruco_ids_lock:
-                    combined_aruco_ids.update(aruco_list)
-
-def receive_from_clients(method, aggregator, flaskServer, stop_event):
-    if method == 'wifi':
-        pose_queue = queue.Queue(maxsize = 5000)
-        port = 6002
-        threading.Thread(target = wifi_listener_enqueue, args=(pose_queue, port, stop_event), daemon=True).start()
-        threading.Thread(target = wifi_processor_dequeue, args=(pose_queue, aggregator, flaskServer, stop_event), daemon=True).start()
-    elif method == 'i2c':
-        # Use a single I2C bus for all slave addresses
-        i2c_bus = {0x08: smbus2.SMBus(1), 0x09: smbus2.SMBus(3)} 
-        bus_map = {addr: i2c_bus for addr in SLAVE_CONFIG.keys()}
-        addrs = list(SLAVE_CONFIG.keys())
-        buses = [bus_map[addr] for addr in addrs]
-        threading.Thread(target=i2c_listener, args=(buses, addrs, aggregator, flaskServer, stop_event), daemon=True).start()
-
-def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
-    global ready_flags
-    last_counters = {addr: 0 for addr in addresses}
-    lost_packages = {addr: 0 for addr in addresses}
-    packages = {addr: 0 for addr in addresses}
-    pose_temp = {}
-    all_connected_slaves = set()    
-    time_diff = 0.0
-    while not stop_event.is_set():
-        try:
-            # Wait for any ready event
-            for addr in addresses:
-                bus = buses[addresses.index(addr)]
-                if addr not in all_connected_slaves and GPIO.input(SLAVE_CONFIG[addr]) == GPIO.HIGH:
-                    bus.write_byte(addr, 0xA5)
-                    all_connected_slaves.add(addr)
-                    ready_flags[addr].clear()
-                    
-                if ready_flags[addr].is_set():
-                    ready_flags[addr].clear()
-                    try:
-                        data = bus.read_i2c_block_data(addr, 0, 16)
-                        if bytes(data[0:2]) == bytes([0xEB,0x90]):
-                            packages[addr] += 1
-                            print(f"[MASTER addr {hex(addr)}] Received:", bytes(data).hex(), len(data))
-                            counter, packet_type = struct.unpack('<BB', bytes(data[2:4]))
-                            
-                            if packet_type == 0x01:
-                                x, y, z, timestamp = struct.unpack('<3HI', bytes(data[4:14]))
-                                # Convert the 16-bit raw integers back into float16
-                                pose_f16 = np.array([x, y, z], dtype=np.uint16).view(np.float16)
-                                # convert to float32 for better precision
-                                pose_f32 = pose_f16.astype(np.float32)
-                                x, y, z = pose_f32[0], pose_f32[1], pose_f32[2]
-                                pose_temp[addr] = {'counter': counter, 'pose': (x, y, z)}
-                                if ((pose_temp[addr]['counter'] - last_counters[addr]) % 256) != 1:
-                                    lost_packages[addr] += ((pose_temp[addr]['counter'] - last_counters[addr]) % 256)
-                                
-                                last_counters[addr] = pose_temp[addr]['counter']
-                                acc = 100 - ((lost_packages[addr] / packages[addr]) * 100)
-                                print(f"The Accuracy of receiving messages are : {acc}%")
-                                print(f"[MASTER addr {hex(addr)}] Timestamp received:", timestamp)
-                                now = (time.time_ns() // 1000) & 0xFFFFFFFF
-                                print(f"[MASTER addr {hex(addr)}] Current time      :", now)
-                                time_diff = (now - timestamp) & 0xFFFFFFFF
-                                print(f"[MASTER addr {hex(addr)}] Time diff (μs)    :", time_diff)
-                            
-                                if not any(np.isnan(pose_temp[addr]['pose'])) and 0 <= time_diff <= POSE_UPDATE_THRESHOLD:
-                                    aggregator.update_pose((x, y, z))
-                                    pose = aggregator.get_average_pose()
-                                    if pose:
-                                        x, y, z = pose
-                                        flaskServer.updatePosition(x, y, z)
-                                        print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
-                            
-                            elif packet_type == 0x02:
-                                if addr in pose_temp and pose_temp[addr]['counter'] == counter:
-                                    num_of_detected_aruco = struct.unpack('<B', bytes(data[4:5]))
-                                    if num_of_detected_aruco > 0:
-                                        aruco_id_list = struct.unpack(f'<{num_of_detected_aruco}B', bytes(data[5:(5 + num_of_detected_aruco)]))
-                                        pose = aggregator.get_average_pose()
-                                        if pose:
-                                            update_pose_visual_and_stats("3D Pose Estimation",pose, aruco_id_list)
-                                        
-                    except Exception as e:
-                        print(f"[I2C addr {hex(addr)}] Read error: {e}")
-                        
-        except Exception as e:
-            print(f"[I2C Listener] Fatal error: {e}")
-                   
 def main():
     global known_markers
     # --- Generate Aruco board for camera calibration ---
@@ -419,16 +164,9 @@ def main():
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     threading.Thread(target=plot_updater_thread, args = (aggregator, stop_event), daemon=True).start()
     server_thread.start()
-    
-    if COMMUNICATION_METHOD == "i2c":
-        for addr, pin in SLAVE_CONFIG.items():
-            GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-            ready_flags[addr] = threading.Event()
-            GPIO.add_event_detect(pin, GPIO.RISING, callback=make_callback(addr))
-    
-    receive_from_clients(COMMUNICATION_METHOD, aggregator, flaskServer, stop_event)
-    
-    # --- Open Camera for Video Capturing ---
+    averaging_thread =  threading.Thread(target=start_averaging_loop_in_thread, args=(flaskServer,), daemon=True)
+    averaging_thread.start()
+
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
@@ -581,7 +319,7 @@ def main():
 
     #Now wait for all threads to end
     server_thread.join()
-    #averaging_thread.join()
+    averaging_thread.join()
 
 if __name__ == "__main__":
     main()
