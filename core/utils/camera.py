@@ -29,6 +29,7 @@ def generate_data_for_calibrate():
             cv2.imshow("img", img)
             count += 1
         elif key == ord('q'):
+            cv2.destroyAllWindows()
             break
 
 def generate_charuco_board(squaresX: int = 14, squaresY: int = 10, squareLength: float = 0.04, markerLength: float = 0.032):

@@ -10,14 +10,20 @@ import socket
 import json
 from communication.i2c_slave_emulated import SimpleI2CSlave
 import threading
+import math
 
 # --- GLOBAL Variables --- 
 HOST = ""
 PORT = 6002
 SLAVE_ADDRESS = 0x08
+DELAY_TIME = 0.001
+COMMUNICATION_METHOD = 'i2c'  # ← change to 'WiFi or i2c' when needed
+GENERATE_ARUCO_BOARD = True
 
 CAMERA_ROTATION_DEG = 90  # or any angle
 theta = np.radians(CAMERA_ROTATION_DEG)
+
+HEADER = 0xFAF320
 
 R_to_main = np.array([
     [ np.cos(theta), 0, np.sin(theta)],
@@ -26,25 +32,35 @@ R_to_main = np.array([
 ])
 
 payload_lock = threading.Lock()
-payload = struct.pack('<fffQ', 1.0, 2.0, 4.0, (time.time_ns() // 1000))
+payload = None
+empty_payload = struct.pack('<BBBfffQ', HEADER, math.nan, math.nan, math.nan, (time.time_ns() // 1000))
 slave = SimpleI2CSlave(SLAVE_ADDRESS)
 
 def slave_listener(stop_event):
-    global payload
+    delay_time = DELAY_TIME
+    global payload,empty_payload
     try:
         while not stop_event.is_set():
             with payload_lock:
-                response = payload
-                
+                if payload is not None:
+                    if payload != response:
+                        response = payload
+                    else:
+                        response = empty_payload
+                    
+            slave.pi.bsc_i2c(slave.address, response)   
             status, bytes_read, rx_data = slave.pi.bsc_i2c(slave.address)
-            
-            if status & 0x01:  # If master is reading from us
-                slave.pi.bsc_i2c(slave.address, response)
-                print("[SLAVE] Sending bytes:", response.hex())
+            if bytes_read == 1 and rx_data[0] == 0:  # If master is reading from us
                 print("[I2C] Master read detected → sent payload")
-            
-            time.sleep(0.001)
+                
+            if status & 0x10:
+                delay_time = delay_time - (delay_time / 2)
+                
+            elif status & 0x4:
+                delay_time = delay_time + (delay_time / 2)
 
+            time.sleep(delay_time)
+        
     except KeyboardInterrupt:
         slave.close()
 
@@ -89,6 +105,8 @@ def generate_aruco_board():
 
     # Generate safe marker positions
     positions_list = generate_safe_positions(len(marker_ids), marker_size_m, min_spacing_m)
+    if len(positions_list) < len(marker_ids):
+        raise RuntimeError("❌ Failed to generate safe positions for all markers.")
     positions_m = {id: pos for id, pos in zip(marker_ids, positions_list)}
 
     # Center point on canvas
@@ -96,6 +114,9 @@ def generate_aruco_board():
 
     # Draw all markers
     for marker_id in marker_ids:
+        if marker_id not in positions_m:
+            print(f"⚠️ Skipping marker ID {marker_id} — no position assigned.")
+            continue
         marker_img = cv2.aruco.drawMarker(aruco_dict, marker_id, marker_size_px)
 
         x_m, y_m, _ = positions_m[marker_id]
@@ -132,7 +153,12 @@ def send_pose(method, pose):
 
 def main():
 
-    generate_aruco_board()
+    if GENERATE_ARUCO_BOARD:
+        try:
+            generate_aruco_board()
+        
+        except RuntimeError as e:
+            print(f"[ARUCO BOARD ERROR] {e}")
     recalibrate = False
     camera = Camera()
 
@@ -145,8 +171,7 @@ def main():
     detector = Detection(known_markers_path="core/utils/known_markers.json")
     stop_event = threading.Event()
     # Choose communication method: 'wifi' or 'i2c'
-    communication_method = 'i2c'  # ← change to 'i2c' when needed
-    if communication_method == 'i2c':
+    if COMMUNICATION_METHOD == 'i2c':
         threading.Thread(target=slave_listener,args=(stop_event,), daemon=True).start()
         
     video = cv2.VideoCapture(0)
@@ -239,16 +264,15 @@ def main():
                 pose_global = (R_to_main @ filtered_pos).flatten()
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
                 with payload_lock:
-                    global payload
-                    payload = struct.pack('<fffQ', pose_global[0], pose_global[1], pose_global[2], (time.time_ns() // 1000))
-                send_pose(communication_method, tuple(pose_global))
+                    payload = struct.pack('<BBBfffQ',HEADER , pose_global[0], pose_global[1], pose_global[2], (time.time_ns() // 1000))
+                send_pose(COMMUNICATION_METHOD, tuple(pose_global))
                 #print Average Camera Position
                 print(f"Filtered Camera Position -> X: {pose_global[0]:.2f}, Y: {pose_global[1]:.2f}, Z: {pose_global[2]:.2f}")
     
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
                 with payload_lock:
-                    payload = struct.pack('<fffQ', 0.0, 0.0, 0.0, (time.time_ns() // 1000))
+                    payload = empty_payload
                 
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -256,7 +280,7 @@ def main():
                 break
 
     cv2.destroyAllWindows()
-    if communication_method == "i2c":
+    if COMMUNICATION_METHOD == "i2c":
         slave.close()
 
 if __name__ == "__main__":

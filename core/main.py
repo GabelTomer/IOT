@@ -17,6 +17,7 @@ import math
 import select
 
 POSE_UPDATE_THRESHOLD = 10000.0
+GENERATE_ARUCO_BOARD = True
 
 def runServer(flaskServer : server):
     
@@ -64,6 +65,8 @@ def generate_aruco_board():
 
     # Generate safe marker positions
     positions_list = generate_safe_positions(len(marker_ids), marker_size_m, min_spacing_m)
+    if len(positions_list) < len(marker_ids):
+        raise RuntimeError("❌ Failed to generate safe positions for all markers.")
     positions_m = {id: pos for id, pos in zip(marker_ids, positions_list)}
 
     # Center point on canvas
@@ -71,6 +74,9 @@ def generate_aruco_board():
 
     # Draw all markers
     for marker_id in marker_ids:
+        if marker_id not in positions_m:
+            print(f"⚠️ Skipping marker ID {marker_id} — no position assigned.")
+            continue
         marker_img = cv2.aruco.drawMarker(aruco_dict, marker_id, marker_size_px)
 
         x_m, y_m, _ = positions_m[marker_id]
@@ -167,39 +173,46 @@ def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
         while not stop_event.is_set():
             for bus, addr in zip(buses, address):
                 try:
-                    data = bus.read_i2c_block_data(addr, 0, 20)
-                    print("[MASTER] Received:", bytes(data).hex(), len(data))
-                    x, y, z, timestamp = struct.unpack('<fffQ', bytes(data))
-                    print("[MASTER] Timestamp received:", timestamp)
-                    print("[MASTER] Current time      :", time.time_ns() // 1000)
-                    print("[MASTER] Time diff (μs)    :", (time.time_ns() // 1000) - timestamp)
-                    time_now = time.time_ns() // 1000
-                    time_diff = time_now - timestamp
-                    if not any(math.isnan(v) for v in (x, y, z)) and time_diff <= POSE_UPDATE_THRESHOLD:
-                        total_x += x
-                        total_y += y
-                        total_z += z
-                        count += 1
+                    data = bus.read_i2c_block_data(addr, 0, 23)
+                    if data[0:2] == 0xFAF320:
+                        print("[MASTER] Received:", bytes(data).hex(), len(data))
+                        x, y, z, timestamp = struct.unpack('<fffQ', bytes(data[3:]))
+                        print("[MASTER] Timestamp received:", timestamp)
+                        print("[MASTER] Current time      :", time.time_ns() // 1000)
+                        print("[MASTER] Time diff (μs)    :", (time.time_ns() // 1000) - timestamp)
+                        time_now = time.time_ns() // 1000
+                        time_diff = time_now - timestamp
+                        if not any(math.isnan(v) for v in (x, y, z)) and time_diff <= POSE_UPDATE_THRESHOLD:
+                            total_x += x
+                            total_y += y
+                            total_z += z
+                            count += 1
                         
+                        if count > 0:
+                            aggregator.update_pose((total_x, total_y, total_z), count)
+                            pose = aggregator.get_average_pose()
+                            if pose:
+                                x, y, z = pose
+                                flaskServer.updatePosition(x, y, z)
+                                print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
+                        
+                    time.sleep(0.0035)
+                         
                 except Exception as e:
                     print(f"[I2C addr {hex(addr)}] Read error: {e}")
-
-            if count > 0:
-                aggregator.update_pose((total_x, total_y, total_z), count)
-                pose = aggregator.get_average_pose()
-                if pose:
-                    x, y, z = pose
-                    flaskServer.updatePosition(x, y, z)
-                    print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
-            
-            time.sleep(0.0035)
 
     except Exception as e:
         print(f"[I2C Listener] Fatal error: {e}")
                    
 def main():
-
-    generate_aruco_board()
+    
+    if GENERATE_ARUCO_BOARD:
+        try:
+            generate_aruco_board()
+        
+        except RuntimeError as e:
+            print(f"[ARUCO BOARD ERROR] {e}")
+        
     recalibrate = False
     camera = Camera()
 
