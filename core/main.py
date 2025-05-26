@@ -10,6 +10,7 @@ import random
 import asyncio
 import aiohttp
 import threading
+import os
 
 async def compute_average(session, flaskServer, ip, direction):
     MAX_ALLOWED_AGE = 0.2  # seconds, adjust as needed
@@ -199,10 +200,11 @@ def main():
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
-            cv2.imshow("Detection", frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                stop_event.set()  # <<<<<< Tell all threads to stop
-                break
+            if os.environ.get('DISPLAY', '') != '':
+                cv2.imshow("Detection", frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    stop_event.set()  # <<<<<< Tell all threads to stop
+                    break
 
 
     cv2.destroyAllWindows()
