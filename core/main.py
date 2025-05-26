@@ -11,6 +11,7 @@ import random
 import asyncio
 import aiohttp
 import threading
+import os
 
 async def compute_average(session, flaskServer, ip, direction):
     MAX_ALLOWED_AGE = 0.2  # seconds, adjust as needed
