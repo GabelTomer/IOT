@@ -23,7 +23,7 @@ async def compute_average(session, flaskServer, ip, direction):
                 z = data.get("z", 0)
                 timeStamp = data.get("timestamp", 0)
                 if time.time() - timeStamp < MAX_ALLOWED_AGE:
-                    oldData = flaskServer.getPosition()
+                    oldData = flaskServer.getPos()
                     if oldData is not None:
                         x = (x + oldData['x']) / 2
                         y = (y + oldData['y']) / 2
