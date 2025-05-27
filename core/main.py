@@ -108,6 +108,13 @@ def wifi_listener_enqueue(pose_queue, ports):
         sockets.append(sock)
         print(f"[WIFI] Listening on port {port}")
 
+def resource_path(relative_path):
+    import sys, os
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.abspath(relative_path)
+
+def test_communication():
     inputs = sockets.copy()
 
     while True:
