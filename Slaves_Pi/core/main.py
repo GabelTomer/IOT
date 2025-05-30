@@ -33,7 +33,8 @@ R_to_main = np.array([
 
 payload_lock = threading.Lock()
 payload = None
-empty_payload = struct.pack('<BBBfffQ', HEADER, math.nan, math.nan, math.nan, (time.time_ns() // 1000))
+counter = 0
+empty_payload = struct.pack('<BBBBfffQ', HEADER, counter, math.nan, math.nan, math.nan, (time.time_ns() // 1000))
 slave = SimpleI2CSlave(SLAVE_ADDRESS)
 
 def slave_listener(stop_event):
@@ -50,6 +51,7 @@ def slave_listener(stop_event):
                     
             slave.pi.bsc_i2c(slave.address, response)   
             status, bytes_read, rx_data = slave.pi.bsc_i2c(slave.address)
+            print(f"[I2C_Slave] : the status is {status}")
             if bytes_read == 1 and rx_data[0] == 0:  # If master is reading from us
                 print("[I2C] Master read detected → sent payload")
                 
@@ -264,7 +266,8 @@ def main():
                 pose_global = (R_to_main @ filtered_pos).flatten()
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
                 with payload_lock:
-                    payload = struct.pack('<BBBfffQ',HEADER , pose_global[0], pose_global[1], pose_global[2], (time.time_ns() // 1000))
+                    counter = (counter + 1) % 256
+                    payload = struct.pack('<BBBBfffQ',HEADER, counter, pose_global[0], pose_global[1], pose_global[2], (time.time_ns() // 1000))
                 send_pose(COMMUNICATION_METHOD, tuple(pose_global))
                 #print Average Camera Position
                 print(f"Filtered Camera Position -> X: {pose_global[0]:.2f}, Y: {pose_global[1]:.2f}, Z: {pose_global[2]:.2f}")
@@ -272,6 +275,7 @@ def main():
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
                 with payload_lock:
+                    counter = (counter + 1) % 256
                     payload = empty_payload
                 
             cv2.imshow("Detection", frame)

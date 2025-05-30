@@ -166,6 +166,7 @@ def receive_from_clients(method, aggregator, flaskServer, stop_event):
         threading.Thread(target=i2c_listener, args=([bus_pi2, bus_pi3], [addr_pi2, addr_pi3], aggregator, flaskServer, stop_event), daemon=True).start()
 
 def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
+    last_counter = 0
     try:
         time_diff = 0.0
         total_x = total_y = total_z = 0.0
@@ -173,10 +174,14 @@ def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
         while not stop_event.is_set():
             for bus, addr in zip(buses, address):
                 try:
-                    data = bus.read_i2c_block_data(addr, 0, 23)
+                    data = bus.read_i2c_block_data(addr, 0, 24)
                     if data[0:2] == 0xFAF320:
                         print("[MASTER] Received:", bytes(data).hex(), len(data))
-                        x, y, z, timestamp = struct.unpack('<fffQ', bytes(data[3:]))
+                        counter, x, y, z, timestamp = struct.unpack('<BfffQ', bytes(data[3:]))
+                        if (counter + 1 - last_counter) % 256 == 1:
+                            print("[MASTER] : No missing message")
+                            last_counter = counter
+                            
                         print("[MASTER] Timestamp received:", timestamp)
                         print("[MASTER] Current time      :", time.time_ns() // 1000)
                         print("[MASTER] Time diff (μs)    :", (time.time_ns() // 1000) - timestamp)
