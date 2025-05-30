@@ -4,6 +4,7 @@ import numpy as np
 import os
 import glob
 
+
 '''This script is for generating data
 1. Provide desired path to store images.
 2. Press 'c' to capture image and display it.
@@ -63,7 +64,8 @@ class Camera:
 
     def __repr__(self):
         return f"Camera(id={self.camera_id}, name={self.camera_name}, type={self.camera_type})"
-         
+    
+
     def calibrate_camera(self):
         images_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aruco_data")
         if not os.path.exists(images_folder) or not any(fname.endswith(".jpg") for fname in os.listdir(images_folder)):
