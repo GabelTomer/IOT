@@ -653,7 +653,7 @@ class _RobotControl extends State<RobotControl> {
   bool pressed = false;
 
   // Adjust based on your robot's IP
-  final String robotIP = "192.168.1.104";
+  final String robotIP = "192.168.0.104";
 
   // Send joystick data, throttle to every 100ms
   void sendJoystickCommand(double x, double y) async {

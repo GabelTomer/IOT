@@ -4,6 +4,7 @@ import threading
 
 class server:
     def __init__(self,  port = 5000, known_markers_path=None, detector=None):
+        self.target_position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
         self.detector = detector
         self.chosen_room = None
         self.known_markers = self.load_known_markers(known_markers_path) if known_markers_path else {}
@@ -22,7 +23,11 @@ class server:
         self.app = Flask(__name__)
     
    
-    
+    def get_target(self):
+        with self.lock:
+            return self.target_position
+        
+
     def load_known_markers(self, path):
         with open(path, 'r') as file:
             data = json.load(file)
@@ -153,7 +158,18 @@ class server:
                 self.save_markers(self.known_markers, room = self.chosen_room)
                 return jsonify({'status': 'success'}), 200
             return jsonify({'error': 'Invalid input'}), 400
-    
+        
+        @self.app.route('/set_target', methods=['POST'])
+        def set_target():
+            data = request.get_json()
+            if 'x' in data and 'y' in data:
+                with self.lock:
+                    self.target_position['x'] = data['x']
+                    self.target_position['y'] = data['y']
+                    self.target_position['z'] = data.get('z', 0.0)
+                return jsonify({'status': 'success', 'target': self.target_position})
+            return jsonify({'error': 'Invalid data'}), 400
+
     
     def updatePosition(self, x, y, z):
         with self.lock:

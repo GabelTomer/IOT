@@ -8,6 +8,21 @@ from detection import Detection
 import sys
 from server.flaskServer import server
 import random
+import requests
+import math
+
+CAR_IP = "192.168.0.104"
+
+def send_command(cmd):
+    url = f"http://{CAR_IP}/{cmd}"
+    try:
+        response = requests.get(url, timeout=0.5)
+        if response.status_code == 200:
+            print(f"Sent command: {cmd}")
+        else:
+            print(f"Failed to send command: {cmd}: {response.status_code}")
+    except requests.exceptions.RequestException as e:
+        print(f"Error sending {cmd}: {e}")
 
 
 def runServer(flaskServer : server):
@@ -92,7 +107,6 @@ def resource_path(relative_path):
     return os.path.abspath(relative_path)
 
 def main():
-
     #generate_aruco_board()
     recalibrate = False
     camera = Camera()
@@ -108,23 +122,31 @@ def main():
     flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector)
     stop_event = threading.Event()
     
-    server_thread = threading.Thread(target=runServer, args=(flaskServer,))
-    
+    server_thread = threading.Thread(target=runServer, args=(flaskServer,))    
     server_thread.start()
+
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
         sys.exit(1)
+    
+    # for navigating:
+    LOOP_DELAY = 0.2 # seconds 
+    REACHED_THRESHOLD = 0.15 # meters
+    previous_pos = None
+    robot_heading = 0.0
+
     # Main thread displays
     while True:
 
-      
             ret, frame = video.read()
             if not ret:
                 break
             
             corners, twoDArray, threeDArray, threeDCenters, frame = detector.aruco_detect(frame=frame)
             
+            current_pos = flaskServer.getPos()
+            target_pos = flaskServer.get_target()
             
             if twoDArray is not None and threeDArray is not None:
                 if twoDArray.shape[0] < 4:
@@ -157,6 +179,38 @@ def main():
                     else:
                         print(f"[ERROR] Mismatch or not enough points: {len(twoDArray)} 2D points, {len(threeDArray)} 3D points")
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
+                current_pos = flaskServer.getPos()
+                target_pos = flaskServer.get_target()
+
+                dx = target_pos['x'] - current_pos['x']
+                dy = target_pos['y'] - current_pos['y']
+                distance = math.hypot(dx, dy)
+
+                if previous_pos:
+                    delta_x = current_pos['x'] - previous_pos['x']
+                    delta_y = current_pos['y'] - previous_pos['y']
+                    if delta_x != 0 or delta_y != 0:
+                        robot_heading = math.atan2(delta_y, delta_x)
+
+                if distance < REACHED_THRESHOLD:
+                    send_command("stop")
+                else:
+                    angle_to_target = math.atan2(dy, dx)
+                    heading_error = angle_to_target - robot_heading
+                    heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error)) # Normalize
+
+                # Simple steering logic
+                if abs(heading_error) < math.radians(15):
+                    send_command("forward")
+                elif heading_error > 0:
+                    send_command("leftShort")
+                else:
+                    send_command("rightShort")
+
+                previous_pos = current_pos
+
+                cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
+            
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
             cv2.imshow("Detection", frame)
