@@ -1,43 +1,70 @@
-import threading
 import struct
-import queue
 import cv2
 import time
 import numpy as np
 from utils import Camera
 from detection import Detection
 import sys
-from communication.pose_aggregator import PoseAggregator
-from server.flaskServer import server
 import random
 import socket
 import json
-import smbus2
-import math
-import select
-import requests
+from communication.i2c_slave_emulated import SimpleI2CSlave
+import threading
 import math
 
-CAR_IP = "192.168.0.104"
-
-def send_command(cmd):
-    url = f"http://{CAR_IP}/{cmd}"
-    try:
-        response = requests.get(url, timeout=0.5)
-        if response.status_code == 200:
-            print(f"Sent command: {cmd}")
-        else:
-            print(f"Failed to send command: {cmd}: {response.status_code}")
-    except requests.exceptions.RequestException as e:
-        print(f"Error sending {cmd}: {e}")
-
-POSE_UPDATE_THRESHOLD = 10000.0
+# --- GLOBAL Variables --- 
+HOST = ""
+PORT = 6002
+SLAVE_ADDRESS = 0x08
+DELAY_TIME = 0.001
+COMMUNICATION_METHOD = 'i2c'  # ← change to 'WiFi or i2c' when needed
 GENERATE_ARUCO_BOARD = True
 
-def runServer(flaskServer : server):
-    
-    flaskServer.setup_routes()
-    flaskServer.run()
+CAMERA_ROTATION_DEG = 90  # or any angle
+theta = np.radians(CAMERA_ROTATION_DEG)
+
+HEADER = 0xFAF320
+
+R_to_main = np.array([
+    [ np.cos(theta), 0, np.sin(theta)],
+    [ 0,             1, 0            ],
+    [-np.sin(theta), 0, np.cos(theta)]
+])
+
+payload_lock = threading.Lock()
+payload = None
+counter = 0
+empty_payload = struct.pack('<BBBBfffQ', HEADER, counter, math.nan, math.nan, math.nan, (time.time_ns() // 1000))
+slave = SimpleI2CSlave(SLAVE_ADDRESS)
+
+def slave_listener(stop_event):
+    delay_time = DELAY_TIME
+    global payload,empty_payload
+    try:
+        while not stop_event.is_set():
+            with payload_lock:
+                if payload is not None:
+                    if payload != response:
+                        response = payload
+                    else:
+                        response = empty_payload
+                    
+            slave.pi.bsc_i2c(slave.address, response)   
+            status, bytes_read, rx_data = slave.pi.bsc_i2c(slave.address)
+            print(f"[I2C_Slave] : the status is {status}")
+            if bytes_read == 1 and rx_data[0] == 0:  # If master is reading from us
+                print("[I2C] Master read detected → sent payload")
+                
+            if status & 0x10:
+                delay_time = delay_time - (delay_time / 2)
+                
+            elif status & 0x4:
+                delay_time = delay_time + (delay_time / 2)
+
+            time.sleep(delay_time)
+        
+    except KeyboardInterrupt:
+        slave.close()
 
 def generate_aruco_board():
     # Constants
@@ -113,126 +140,27 @@ def generate_aruco_board():
         x, y, z = positions_m[marker_id]
         print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
 
-def wifi_listener_enqueue(pose_queue, ports):
-    sockets = []
-    for port in ports:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(('', port))
-        sock.listen(1)
-        sock.setblocking(False)
-        sockets.append(sock)
-        print(f"[WIFI] Listening on port {port}")
+def send_pose(method, pose):
+    x, y, z = pose
+    if method == "wifi":
+        pose_packet = {
+            "x": x,
+            "y": y,
+            "z": z,
+            "timestamp": time.time()
+        }
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.connect((HOST, PORT))
+            sock.sendall(json.dumps(pose_packet).encode('utf-8'))
 
-def resource_path(relative_path):
-    import sys, os
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.abspath(relative_path)
-
-def test_communication():
-    inputs = sockets.copy()
-
-    while True:
-        readable, _, _ = select.select(inputs, [], [])
-        for s in readable:
-            if s in sockets:
-                conn, addr = s.accept()
-                conn.setblocking(False)
-                inputs.append(conn)
-                print(f"[WIFI] Connected: {addr}")
-            else:
-                try:
-                    data = s.recv(1024).decode()
-                    if not data:
-                        inputs.remove(s)
-                        s.close()
-                        continue
-                    pose_data = json.loads(data)
-                    x = pose_data.get("x")
-                    y = pose_data.get("y")
-                    z = pose_data.get("z")
-                    if None not in (x, y, z):
-                        pose_queue.put((x, y, z))
-                except Exception as e:
-                    print(f"[WIFI] Error: {e}")
-                    inputs.remove(s)
-                    s.close()
-
-def wifi_processor_dequeue(pose_queue, aggregator, flaskServer):
-    total_x = total_y = total_z = 0.0
-    count = 0
-    while True:
-        if not pose_queue.empty():
-            x, y, z = pose_queue.get()
-            total_x += x
-            total_y += y
-            total_z += z
-            count += 1
-            aggregator.update_pose((total_x, total_y, total_z), count)
-            pose = aggregator.get_average_pose()
-            if pose:
-                x, y, z = pose
-                flaskServer.updatePosition(x, y, z)
-
-def receive_from_clients(method, aggregator, flaskServer, stop_event):
-    if method == 'wifi':
-        pose_queue = queue.Queue()
-        ports = [6001, 6002]
-        threading.Thread(target=wifi_listener_enqueue, args=(pose_queue, ports), daemon=True).start()
-        threading.Thread(target=wifi_processor_dequeue, args=(pose_queue, aggregator, flaskServer), daemon=True).start()
-    elif method == 'i2c':
-        bus_pi2 = smbus2.SMBus(1)
-        bus_pi3 = smbus2.SMBus(3)
-        addr_pi2 = 0x08
-        addr_pi3 = 0x09
-        threading.Thread(target=i2c_listener, args=([bus_pi2, bus_pi3], [addr_pi2, addr_pi3], aggregator, flaskServer, stop_event), daemon=True).start()
-
-def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
-    last_counter = 0
-    try:
-        time_diff = 0.0
-        total_x = total_y = total_z = 0.0
-        count = 0
-        while not stop_event.is_set():
-            for bus, addr in zip(buses, address):
-                try:
-                    data = bus.read_i2c_block_data(addr, 0, 24)
-                    if data[0:2] == 0xFAF320:
-                        print("[MASTER] Received:", bytes(data).hex(), len(data))
-                        counter, x, y, z, timestamp = struct.unpack('<BfffQ', bytes(data[3:]))
-                        if (counter + 1 - last_counter) % 256 == 1:
-                            print("[MASTER] : No missing message")
-                            last_counter = counter
-                            
-                        print("[MASTER] Timestamp received:", timestamp)
-                        print("[MASTER] Current time      :", time.time_ns() // 1000)
-                        print("[MASTER] Time diff (μs)    :", (time.time_ns() // 1000) - timestamp)
-                        time_now = time.time_ns() // 1000
-                        time_diff = time_now - timestamp
-                        if not any(math.isnan(v) for v in (x, y, z)) and time_diff <= POSE_UPDATE_THRESHOLD:
-                            total_x += x
-                            total_y += y
-                            total_z += z
-                            count += 1
-                        
-                        if count > 0:
-                            aggregator.update_pose((total_x, total_y, total_z), count)
-                            pose = aggregator.get_average_pose()
-                            if pose:
-                                x, y, z = pose
-                                flaskServer.updatePosition(x, y, z)
-                                print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
-                        
-                    time.sleep(0.0035)
-                         
-                except Exception as e:
-                    print(f"[I2C addr {hex(addr)}] Read error: {e}")
-
-    except Exception as e:
-        print(f"[I2C Listener] Fatal error: {e}")
-                   
 def main():
-    #generate_aruco_board()
+
+    if GENERATE_ARUCO_BOARD:
+        try:
+            generate_aruco_board()
+        
+        except RuntimeError as e:
+            print(f"[ARUCO BOARD ERROR] {e}")
     recalibrate = False
     camera = Camera()
 
@@ -243,25 +171,15 @@ def main():
             recalibrate = True
         
     detector = Detection(known_markers_path="core/utils/known_markers.json")
-
-    flaskServer = server(port = 5000)
     stop_event = threading.Event()
-    aggregator = PoseAggregator()
-    
-    server_thread = threading.Thread(target=runServer, args=(flaskServer,))    
-    server_thread.start()
-
+    # Choose communication method: 'wifi' or 'i2c'
+    if COMMUNICATION_METHOD == 'i2c':
+        threading.Thread(target=slave_listener,args=(stop_event,), daemon=True).start()
+        
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
         sys.exit(1)
-    
-    # for navigating:
-    LOOP_DELAY = 0.2 # seconds 
-    REACHED_THRESHOLD = 0.15 # meters
-    previous_pos = None
-    robot_heading = 0.0
-
     # Main thread displays
     
     # === Kalman Filter Configuration ===
@@ -289,15 +207,11 @@ def main():
     filtered_pos = 0
     while True:
 
-
             ret, frame = video.read()
             if not ret:
                 break
             
             corners, twoDArray, threeDArray, threeDCenters, frame = detector.aruco_detect(frame=frame)
-            
-            current_pos = flaskServer.getPos()
-            target_pos = flaskServer.get_target()
             
             if twoDArray is not None and threeDArray is not None:
                 if twoDArray.shape[0] < 3:
@@ -348,51 +262,21 @@ def main():
                         kalman.correct(measured)
                         predicted = kalman.predict()
                         filtered_pos = predicted[:3]
-                
+                        
+                pose_global = (R_to_main @ filtered_pos).flatten()
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
-                aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]),1)
-                pose = aggregator.get_average_pose()
-                if pose is not None:
-                    x,y,z = pose
-                    # Update server with smoothed average
-                    flaskServer.updatePosition(x, y, z)
-                    #print Average Camera Position
-                    print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
+                with payload_lock:
+                    counter = (counter + 1) % 256
+                    payload = struct.pack('<BBBBfffQ',HEADER, counter, pose_global[0], pose_global[1], pose_global[2], (time.time_ns() // 1000))
+                send_pose(COMMUNICATION_METHOD, tuple(pose_global))
+                #print Average Camera Position
+                print(f"Filtered Camera Position -> X: {pose_global[0]:.2f}, Y: {pose_global[1]:.2f}, Z: {pose_global[2]:.2f}")
     
-                current_pos = flaskServer.getPos()
-                target_pos = flaskServer.get_target()
-
-                dx = target_pos['x'] - current_pos['x']
-                dy = target_pos['y'] - current_pos['y']
-                distance = math.hypot(dx, dy)
-
-                if previous_pos:
-                    delta_x = current_pos['x'] - previous_pos['x']
-                    delta_y = current_pos['y'] - previous_pos['y']
-                    if delta_x != 0 or delta_y != 0:
-                        robot_heading = math.atan2(delta_y, delta_x)
-
-                if distance < REACHED_THRESHOLD:
-                    send_command("stop")
-                else:
-                    angle_to_target = math.atan2(dy, dx)
-                    heading_error = angle_to_target - robot_heading
-                    heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error)) # Normalize
-
-                # Simple steering logic
-                if abs(heading_error) < math.radians(15):
-                    send_command("forward")
-                elif heading_error > 0:
-                    send_command("leftShort")
-                else:
-                    send_command("rightShort")
-
-                previous_pos = current_pos
-
-                cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
-            
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
+                with payload_lock:
+                    counter = (counter + 1) % 256
+                    payload = empty_payload
                 
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -400,9 +284,8 @@ def main():
                 break
 
     cv2.destroyAllWindows()
-
-    #Now wait for all threads to end
-    server_thread.join()
+    if COMMUNICATION_METHOD == "i2c":
+        slave.close()
 
 if __name__ == "__main__":
     main()
