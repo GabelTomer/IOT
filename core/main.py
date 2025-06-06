@@ -258,7 +258,7 @@ def main():
     
     # for navigating:
     LOOP_DELAY = 0.2 # seconds 
-    REACHED_THRESHOLD = 0.15 # meters
+    REACHED_THRESHOLD = 0.2 # meters
     previous_pos = None
     robot_heading = 0.0
 
@@ -361,6 +361,7 @@ def main():
     
                 current_pos = flaskServer.getPos()
                 target_pos = flaskServer.get_target()
+                print(f"Target position: {target_pos}")
 
                 dx = target_pos['x'] - current_pos['x']
                 dy = target_pos['y'] - current_pos['y']
@@ -370,7 +371,9 @@ def main():
                     delta_x = current_pos['x'] - previous_pos['x']
                     delta_y = current_pos['y'] - previous_pos['y']
                     if delta_x != 0 or delta_y != 0:
-                        robot_heading = math.atan2(delta_y, delta_x)
+                        R, _ = cv2.Rodrigues(rvec)
+                        forward_vec = R[:, 2]
+                        robot_heading = math.atan2(forward_vec[1], forward_vec[0]) #y,x
 
                 if distance < REACHED_THRESHOLD:
                     send_command("stop")
@@ -380,19 +383,26 @@ def main():
                     heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error)) # Normalize
 
                 # Simple steering logic
-                if abs(heading_error) < math.radians(15):
-                    send_command("forward")
-                elif heading_error > 0:
-                    send_command("leftShort")
+                if distance < REACHED_THRESHOLD:
+                    send_command("stop")
+                    print("=== Reached Target ===")
                 else:
-                    send_command("rightShort")
+                    if abs(heading_error) < math.radians(10):
+                        send_command("forward")
+                    elif heading_error > math.radians(10):
+                        send_command("leftShort")
+                        send_command("forward")
+                    elif heading_error < -math.radians(10):
+                        send_command("rightShort")
+                        send_command("forward")
 
                 previous_pos = current_pos
 
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
             
             else:
-                print("[ERROR] twoDArray or threeDArray is None!")
+                # print("[ERROR] twoDArray or threeDArray is None!")
+                send_command("stop")
                 
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
