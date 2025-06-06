@@ -11,19 +11,19 @@ import json
 from communication.i2c_slave_emulated import SimpleI2CSlave
 import threading
 import math
+import queue
 
 # --- GLOBAL Variables --- 
 HOST = ""
 PORT = 6002
 SLAVE_ADDRESS = 0x08
-DELAY_TIME = 0.001
 COMMUNICATION_METHOD = 'i2c'  # ← change to 'WiFi or i2c' when needed
 GENERATE_ARUCO_BOARD = True
 
 CAMERA_ROTATION_DEG = 90  # or any angle
 theta = np.radians(CAMERA_ROTATION_DEG)
 
-HEADER = 0xFAF320
+HEADER = 0xEB90
 
 R_to_main = np.array([
     [ np.cos(theta), 0, np.sin(theta)],
@@ -31,38 +31,25 @@ R_to_main = np.array([
     [-np.sin(theta), 0, np.cos(theta)]
 ])
 
+data_queue = queue.Queue(maxsize = 500)
 payload_lock = threading.Lock()
-payload = None
+payload_data = None
 counter = 0
-empty_payload = struct.pack('<BBBBfffQ', HEADER, counter, math.nan, math.nan, math.nan, (time.time_ns() // 1000))
 slave = SimpleI2CSlave(SLAVE_ADDRESS)
 
 def slave_listener(stop_event):
-    delay_time = DELAY_TIME
-    global payload,empty_payload
+    data = None
+    global data_queue
     try:
         while not stop_event.is_set():
-            with payload_lock:
-                if payload is not None:
-                    if payload != response:
-                        response = payload
-                    else:
-                        response = empty_payload
-                    
-            slave.pi.bsc_i2c(slave.address, response)   
             status, bytes_read, rx_data = slave.pi.bsc_i2c(slave.address)
-            print(f"[I2C_Slave] : the status is {status}")
-            if bytes_read == 1 and rx_data[0] == 0:  # If master is reading from us
-                print("[I2C] Master read detected → sent payload")
-                
-            if status & 0x10:
-                delay_time = delay_time - (delay_time / 2)
-                
-            elif status & 0x4:
-                delay_time = delay_time + (delay_time / 2)
-
-            time.sleep(delay_time)
-        
+            if bytes_read > 0 and rx_data[0] == 0xA5:
+                with payload_lock:
+                    if not data_queue.empty():
+                        data = data_queue.get()
+                        print(bytes(data).hex())
+                        slave.pi.bsc_i2c(slave.address, data)
+            
     except KeyboardInterrupt:
         slave.close()
 
@@ -154,7 +141,8 @@ def send_pose(method, pose):
             sock.sendall(json.dumps(pose_packet).encode('utf-8'))
 
 def main():
-
+    
+    global counter,payload_data,data_queue
     if GENERATE_ARUCO_BOARD:
         try:
             generate_aruco_board()
@@ -266,8 +254,10 @@ def main():
                 pose_global = (R_to_main @ filtered_pos).flatten()
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
                 with payload_lock:
-                    counter = (counter + 1) % 256
-                    payload = struct.pack('<BBBBfffQ',HEADER, counter, pose_global[0], pose_global[1], pose_global[2], (time.time_ns() // 1000))
+                    if not data_queue.full():
+                        counter = (counter + 1) % 256
+                        payload_data = struct.pack('<BBBfffH', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, pose_global[0], pose_global[1], pose_global[2], ((time.time_ns() // 1000) & 0xFFFF))
+                        data_queue.put(payload_data)
                 send_pose(COMMUNICATION_METHOD, tuple(pose_global))
                 #print Average Camera Position
                 print(f"Filtered Camera Position -> X: {pose_global[0]:.2f}, Y: {pose_global[1]:.2f}, Z: {pose_global[2]:.2f}")
@@ -275,8 +265,10 @@ def main():
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
                 with payload_lock:
-                    counter = (counter + 1) % 256
-                    payload = empty_payload
+                    if not data_queue.full():
+                        counter = (counter + 1) % 256
+                        payload_data = struct.pack('<BBBfffH', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, math.nan, math.nan, math.nan, ((time.time_ns() // 1000) & 0xFFFF))
+                        data_queue.put(payload_data)
                 
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
