@@ -20,6 +20,7 @@ POSE_UPDATE_THRESHOLD = 40000.0
 GENERATE_ARUCO_BOARD = True
 MIN_DELAY_TIME = 0.0025
 MAX_DELAY_TIME = 0.006
+ALPHA = 0.05
 
 def runServer(flaskServer : server):
     
@@ -180,7 +181,6 @@ def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
     delay_time = MIN_DELAY_TIME
     try:
         time_diff = 0.0
-        total_x = total_y = total_z = 0.0
         while not stop_event.is_set():
             for bus, addr in zip(buses, address):
                 try:
@@ -205,11 +205,7 @@ def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
                         print("[MASTER] Time diff (μs)    :", time_diff)
 
                     if not any(math.isnan(v) for v in (x, y, z)) and time_diff <= POSE_UPDATE_THRESHOLD:
-                        alpha = 0.05  # smoothing factor between 0 and 1
-                        total_x = (1 - alpha) * total_x + alpha * x
-                        total_y = (1 - alpha) * total_y + alpha * y
-                        total_z = (1 - alpha) * total_z + alpha * z
-                        aggregator.update_pose((total_x, total_y, total_z), count)
+                        aggregator.update_pose((x, y, z))
                         pose = aggregator.get_average_pose()
                         if pose:
                             x, y, z = pose
@@ -281,7 +277,6 @@ def main():
 
     # Initial state (0 position, 0 velocity)
     kalman.statePost = np.zeros((6, 1), dtype=np.float32)
-    
     filtered_pos = 0
     while True:
 
@@ -342,7 +337,7 @@ def main():
                         filtered_pos = predicted[:3]
                 
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
-                aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]),1)
+                aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]))
                 pose = aggregator.get_average_pose()
                 if pose is not None:
                     x,y,z = pose
