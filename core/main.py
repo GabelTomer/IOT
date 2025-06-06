@@ -16,8 +16,10 @@ import smbus2
 import math
 import select
 
-POSE_UPDATE_THRESHOLD = 10000.0
+POSE_UPDATE_THRESHOLD = 40000.0
 GENERATE_ARUCO_BOARD = True
+MIN_DELAY_TIME = 0.0025
+MAX_DELAY_TIME = 0.006
 
 def runServer(flaskServer : server):
     
@@ -174,23 +176,28 @@ def receive_from_clients(method, aggregator, flaskServer, stop_event):
 
 def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
     last_counter = 0
+    lost_packages = packages = 0
+    delay_time = MIN_DELAY_TIME
     try:
         time_diff = 0.0
         total_x = total_y = total_z = 0.0
-        count = 0
         while not stop_event.is_set():
             for bus, addr in zip(buses, address):
                 try:
                     bus.write_byte(addr,0xA5)
-                    time.sleep(0.002)
+                    time.sleep(delay_time)
                     data = bus.read_i2c_block_data(addr, 0, 17)
                     if bytes(data[0:2]) == bytes([0xEB, 0x90]):
+                        packages += 1
                         print("[MASTER] Received:", bytes(data).hex(), len(data))
                         counter, x, y, z, timestamp = struct.unpack('<BfffH', bytes(data[2:]))
-                        if (counter + 1 - last_counter) % 256 == 1:
-                            print("[MASTER] : No missing message")
-                            last_counter = counter
-                
+                        if ((counter - last_counter) % 256) != 1:
+                            lost_packages += ((counter - last_counter) % 256)
+                        acc = 100 - ((lost_packages / packages) * 100)
+                        if acc >= 99:
+                            delay_time = max(delay_time * 0.995, MIN_DELAY_TIME)
+                        else:
+                            delay_time = max(delay_time * 1.005, MAX_DELAY_TIME)
                         print("[MASTER] Timestamp received:", timestamp)
                         now = (time.time_ns() // 1000) & 0xFFFF
                         print("[MASTER] Current time      :", now)
@@ -198,12 +205,10 @@ def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
                         print("[MASTER] Time diff (μs)    :", time_diff)
 
                     if not any(math.isnan(v) for v in (x, y, z)) and time_diff <= POSE_UPDATE_THRESHOLD:
-                        total_x += x
-                        total_y += y
-                        total_z += z
-                        count += 1
-                    
-                    if count > 0:
+                        alpha = 0.05  # smoothing factor between 0 and 1
+                        total_x = (1 - alpha) * total_x + alpha * x
+                        total_y = (1 - alpha) * total_y + alpha * y
+                        total_z = (1 - alpha) * total_z + alpha * z
                         aggregator.update_pose((total_x, total_y, total_z), count)
                         pose = aggregator.get_average_pose()
                         if pose:
