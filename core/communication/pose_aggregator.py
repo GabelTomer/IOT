@@ -3,25 +3,24 @@ import threading
 class PoseAggregator:
     def __init__(self):
         self.lock = threading.Lock()
-        self.avg_x = None
-        self.avg_y = None
-        self.avg_z = None
-        self.alpha = 0.05  # Smoothing factor
+        self.sum_x = 0.0
+        self.sum_y = 0.0
+        self.sum_z = 0.0
+        self.count = 0
 
-    def update_pose(self, pose):
+    def update_pose(self, pose, count):
         with self.lock:
             x, y, z = pose
-            if self.avg_x is None:
-                self.avg_x = x
-                self.avg_y = y
-                self.avg_z = z
-            else:
-                self.avg_x = (1 - self.alpha) * self.avg_x + self.alpha * x
-                self.avg_y = (1 - self.alpha) * self.avg_y + self.alpha * y
-                self.avg_z = (1 - self.alpha) * self.avg_z + self.alpha * z
+            self.sum_x += x
+            self.sum_y += y
+            self.sum_z += z
+            self.count += count
 
     def get_average_pose(self):
         with self.lock:
-            if self.avg_x is None:
+            if self.count == 0:
                 return None
-            return self.avg_x, self.avg_y, self.avg_z
+            avg_x = self.sum_x / self.count
+            avg_y = self.sum_y / self.count
+            avg_z = self.sum_z / self.count
+            return avg_x, avg_y, avg_z

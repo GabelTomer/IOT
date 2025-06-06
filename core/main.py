@@ -1,4 +1,6 @@
 import threading
+import struct
+import queue
 import cv2
 import time
 import numpy as np
@@ -6,53 +8,17 @@ from utils import Camera
 from detection import Detection
 import sys
 from communication.pose_aggregator import PoseAggregator
+from communication.pose_aggregator import PoseAggregator
 from server.flaskServer import server
 import random
-import asyncio
-import aiohttp
-import threading
-import os
+import socket
+import json
+import smbus2
+import math
+import select
 
-async def compute_average(session, flaskServer, ip, direction):
-    MAX_ALLOWED_AGE = 0.2  # seconds, adjust as needed
-    try:
-        async with session.get(f"http://{ip}:5000/get_position", timeout=2) as response:
-            if response.status == 200:
-                data = await response.json()
-                x = data.get("x", 0)
-                y = data.get("y", 0)
-                z = data.get("z", 0)
-                timeStamp = data.get("timestamp", 0)
-                if time.time() - timeStamp < MAX_ALLOWED_AGE:
-                    oldData = flaskServer.getPos()
-                    if oldData is not None:
-                        x = (x + oldData['x']) / 2
-                        y = (y + oldData['y']) / 2
-                        z = (z + oldData['z']) / 2
-                        flaskServer.updatePosition(x, y, z)
-    except aiohttp.ClientError as e:
-        print(f"Error fetching position from {direction} server: {e}")
-    except asyncio.TimeoutError:
-        print(f"Timeout when fetching from {direction} server.")
-
-async def averaging_loop(flaskServer):
-    ip_left = "192.168.2.2"
-    ip_right = "192.168.3.2"
-
-    async with aiohttp.ClientSession() as session:
-        while True:
-            await asyncio.gather(
-                compute_average(session, flaskServer, ip_left, "left"),
-                compute_average(session, flaskServer, ip_right, "right")
-            )
-            await asyncio.sleep(0.1)
-
-def start_averaging_loop_in_thread(flaskServer):
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(averaging_loop(flaskServer))
-        
-            
+POSE_UPDATE_THRESHOLD = 10000.0
+GENERATE_ARUCO_BOARD = True
 
 def runServer(flaskServer : server):
     
@@ -100,8 +66,7 @@ def generate_aruco_board():
     # Generate safe marker positions
     positions_list = generate_safe_positions(len(marker_ids), marker_size_m, min_spacing_m)
     if len(positions_list) < len(marker_ids):
-        print(f"⚠️ Only {len(positions_list)} out of {len(marker_ids)} markers were placed safely.")
-        marker_ids = marker_ids[:len(positions_list)]
+        raise RuntimeError("❌ Failed to generate safe positions for all markers.")
     positions_m = {id: pos for id, pos in zip(marker_ids, positions_list)}
 
     # Center point on canvas
@@ -109,6 +74,9 @@ def generate_aruco_board():
 
     # Draw all markers
     for marker_id in marker_ids:
+        if marker_id not in positions_m:
+            print(f"⚠️ Skipping marker ID {marker_id} — no position assigned.")
+            continue
         if marker_id not in positions_m:
             print(f"⚠️ Skipping marker ID {marker_id} — no position assigned.")
             continue
@@ -133,19 +101,133 @@ def generate_aruco_board():
         x, y, z = positions_m[marker_id]
         print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
 
+def wifi_listener_enqueue(pose_queue, ports):
+    sockets = []
+    for port in ports:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(('', port))
+        sock.listen(1)
+        sock.setblocking(False)
+        sockets.append(sock)
+        print(f"[WIFI] Listening on port {port}")
 
+def resource_path(relative_path):
+    import sys, os
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.abspath(relative_path)
+
+def test_communication():
+    inputs = sockets.copy()
+
+    while True:
+        readable, _, _ = select.select(inputs, [], [])
+        for s in readable:
+            if s in sockets:
+                conn, addr = s.accept()
+                conn.setblocking(False)
+                inputs.append(conn)
+                print(f"[WIFI] Connected: {addr}")
+            else:
+                try:
+                    data = s.recv(1024).decode()
+                    if not data:
+                        inputs.remove(s)
+                        s.close()
+                        continue
+                    pose_data = json.loads(data)
+                    x = pose_data.get("x")
+                    y = pose_data.get("y")
+                    z = pose_data.get("z")
+                    if None not in (x, y, z):
+                        pose_queue.put((x, y, z))
+                except Exception as e:
+                    print(f"[WIFI] Error: {e}")
+                    inputs.remove(s)
+                    s.close()
+
+def wifi_processor_dequeue(pose_queue, aggregator, flaskServer):
+    total_x = total_y = total_z = 0.0
+    count = 0
+    while True:
+        if not pose_queue.empty():
+            x, y, z = pose_queue.get()
+            total_x += x
+            total_y += y
+            total_z += z
+            count += 1
+            aggregator.update_pose((total_x, total_y, total_z), count)
+            pose = aggregator.get_average_pose()
+            if pose:
+                x, y, z = pose
+                flaskServer.updatePosition(x, y, z)
+
+def receive_from_clients(method, aggregator, flaskServer, stop_event):
+    if method == 'wifi':
+        pose_queue = queue.Queue()
+        ports = [6001, 6002]
+        threading.Thread(target=wifi_listener_enqueue, args=(pose_queue, ports), daemon=True).start()
+        threading.Thread(target=wifi_processor_dequeue, args=(pose_queue, aggregator, flaskServer), daemon=True).start()
+    elif method == 'i2c':
+        bus_pi2 = smbus2.SMBus(1)
+        bus_pi3 = smbus2.SMBus(3)
+        addr_pi2 = 0x08
+        addr_pi3 = 0x09
+        threading.Thread(target=i2c_listener, args=([bus_pi2, bus_pi3], [addr_pi2, addr_pi3], aggregator, flaskServer, stop_event), daemon=True).start()
+
+def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
+    last_counter = 0
+    try:
+        time_diff = 0.0
+        total_x = total_y = total_z = 0.0
+        count = 0
+        while not stop_event.is_set():
+            for bus, addr in zip(buses, address):
+                try:
+                    data = bus.read_i2c_block_data(addr, 0, 24)
+                    if data[0:2] == 0xFAF320:
+                        print("[MASTER] Received:", bytes(data).hex(), len(data))
+                        counter, x, y, z, timestamp = struct.unpack('<BfffQ', bytes(data[3:]))
+                        if (counter + 1 - last_counter) % 256 == 1:
+                            print("[MASTER] : No missing message")
+                            last_counter = counter
+                            
+                        print("[MASTER] Timestamp received:", timestamp)
+                        print("[MASTER] Current time      :", time.time_ns() // 1000)
+                        print("[MASTER] Time diff (μs)    :", (time.time_ns() // 1000) - timestamp)
+                        time_now = time.time_ns() // 1000
+                        time_diff = time_now - timestamp
+                        if not any(math.isnan(v) for v in (x, y, z)) and time_diff <= POSE_UPDATE_THRESHOLD:
+                            total_x += x
+                            total_y += y
+                            total_z += z
+                            count += 1
+                        
+                        if count > 0:
+                            aggregator.update_pose((total_x, total_y, total_z), count)
+                            pose = aggregator.get_average_pose()
+                            if pose:
+                                x, y, z = pose
+                                flaskServer.updatePosition(x, y, z)
+                                print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
+                        
+                    time.sleep(0.0035)
+                         
+                except Exception as e:
+                    print(f"[I2C addr {hex(addr)}] Read error: {e}")
+
+    except Exception as e:
+        print(f"[I2C Listener] Fatal error: {e}")
+                   
 def main():
-    global known_markers
-    # --- Generate Aruco board for camera calibration ---
+    
     if GENERATE_ARUCO_BOARD:
         try:
-            import random
             generate_aruco_board()
         
         except RuntimeError as e:
             print(f"[ARUCO BOARD ERROR] {e}")
-    
-    # --- Camera Calibration ---   
+        
     recalibrate = False
     camera = Camera(gui_available=_gui_available)
 
@@ -158,16 +240,19 @@ def main():
             print("Retrying calibration. Got error:", mean_error)
         
     detector = Detection(known_markers_path="core/utils/known_markers.json")
-    known_markers = detector.known_markers
+
     flaskServer = server(port = 5000)
-    aggregator = PoseAggregator()
     stop_event = threading.Event()
+    aggregator = PoseAggregator()
+    
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     threading.Thread(target=plot_updater_thread, args = (aggregator, stop_event), daemon=True).start()
     server_thread.start()
-    averaging_thread =  threading.Thread(target=start_averaging_loop_in_thread, args=(flaskServer,), daemon=True)
-    averaging_thread.start()
-
+    
+    # Choose communication method: 'wifi' or 'i2c'
+    communication_method = 'i2c'  # ← change to 'i2c' when needed
+    receive_from_clients(communication_method, aggregator, flaskServer, stop_event)
+    
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
@@ -186,16 +271,77 @@ def main():
     filtered_pos = 0
     
     # Main thread displays
-    while True:
+    
+    # === Kalman Filter Configuration ===
+    kalman = cv2.KalmanFilter(6, 3)  # 6 state variables (pos + velocity), 3 measurements (pos only)
+    # Transition matrix (state update: x = Ax + Bu + w)
+    kalman.transitionMatrix = np.array([
+        [1, 0, 0, 1, 0, 0],  # x
+        [0, 1, 0, 0, 1, 0],  # y
+        [0, 0, 1, 0, 0, 1],  # z
+        [0, 0, 0, 1, 0, 0],  # vx
+        [0, 0, 0, 0, 1, 0],  # vy
+        [0, 0, 0, 0, 0, 1]   # vz
+    ], dtype=np.float32)
 
+    #Measurement matrix (we only measure position)
+    kalman.measurementMatrix = np.eye(3, 6, dtype=np.float32)
+
+    kalman.processNoiseCov = np.eye(6, dtype=np.float32) * 1e-4
+    kalman.measurementNoiseCov = np.eye(3, dtype=np.float32) * 1e-2
+    kalman.errorCovPost = np.eye(6, dtype=np.float32)
+
+    # Initial state (0 position, 0 velocity)
+    kalman.statePost = np.zeros((6, 1), dtype=np.float32)
+    
+    filtered_pos = 0
+    while True:
 
             ret, frame = video.read()
             if not ret:
                 break
             
-            corners, twoDArray, threeDArray, threeDCenters, frame, aruco_markers_detected = detector.aruco_detect(frame=frame)
+            corners, twoDArray, threeDArray, threeDCenters, frame = detector.aruco_detect(frame=frame)
             
             if twoDArray is not None and threeDArray is not None:
+                if twoDArray.shape[0] < 3:
+                    if len(twoDArray) == 2 and len(threeDArray) == 2:
+                        img_pts = twoDArray.reshape(-1, 2).astype(np.float32)
+                        obj_pts = threeDArray.reshape(-1, 3).astype(np.float32)
+                        success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
+                        if success:
+                            R, _ = cv2.Rodrigues(rvec)
+                            position = -R.T @ tvec
+                            measured = np.array(position, dtype=np.float32).reshape(3, 1)
+                            kalman.correct(measured)
+                            predicted = kalman.predict()
+                            filtered_pos = predicted[:3]
+                            
+                    elif len(twoDArray) == 1:
+                        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
+                        rvec = rvecs[0]
+                        tvec = tvecs[0]
+                        #R_marker2world = np.eye(3)
+                        #angle_rad = np.pi / 2
+                        #R_marker2world = cv2.Rodrigues(np.array([angle_rad, 0, 0]))[0]
+                        #R_marker2world[:, 1] *= -1  # Flip the y-axis
+                        R_marker2cam, _ = cv2.Rodrigues(rvec)
+                        t_marker2cam = tvec.reshape(3, 1)
+                        R_cam2marker = R_marker2cam.T
+                        t_cam2marker = -R_marker2cam.T @ t_marker2cam
+                        #R_cam2world = R_marker2world @ R_cam2marker
+                        center_avg = np.mean(threeDCenters, axis=0).reshape(3, 1)
+                        t_cam2world = R_cam2marker @ t_cam2marker + center_avg
+
+
+                        # Compute average position with Kalman Filter
+                        measured = t_cam2world.reshape(3, 1).astype(np.float32)
+                        kalman.correct(measured)
+                        predicted = kalman.predict()
+                        filtered_pos = predicted[:3]
+                
+                elif len(twoDArray) >= 3 and len(threeDArray) >= 3 and len(twoDArray) == len(threeDArray):
+                    flags = cv2.SOLVEPNP_ITERATIVE if len(twoDArray) > 3 else cv2.SOLVEPNP_P3P
                 if twoDArray.shape[0] < 3:
                     if len(twoDArray) == 2 and len(threeDArray) == 2:
                         img_pts = twoDArray.reshape(-1, 2).astype(np.float32)
@@ -237,6 +383,7 @@ def main():
                     img_pts = twoDArray.reshape(-1, 2).astype(np.float32)
                     obj_pts = threeDArray.reshape(-1, 3).astype(np.float32)
                     success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags)
+                    success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags)
                     if success:
                         R, _ = cv2.Rodrigues(rvec)
                         position = -R.T @ tvec
@@ -245,76 +392,23 @@ def main():
                         predicted = kalman.predict()
                         filtered_pos = predicted[:3]
                 
-                aruco_markers_detected = np.array(aruco_markers_detected).flatten().tolist() if aruco_markers_detected is not None else []
-                with aruco_ids_lock:
-                    combined_aruco_ids.update(aruco_markers_detected)
-                    
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
-                aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]))
+                aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]),1)
                 pose = aggregator.get_average_pose()
                 if pose is not None:
-                    x, y, z = pose
+                    x,y,z = pose
                     # Update server with smoothed average
                     flaskServer.updatePosition(x, y, z)
                     #print Average Camera Position
                     print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
     
-                current_pos = flaskServer.getPos()
-                target_pos = flaskServer.get_target()
-                print(f"Target position: {target_pos}")
-
-                dx = target_pos['x'] - current_pos['x']
-                dy = target_pos['y'] - current_pos['y']
-                distance = math.hypot(dx, dy)
-
-                if previous_pos:
-                    delta_x = current_pos['x'] - previous_pos['x']
-                    delta_y = current_pos['y'] - previous_pos['y']
-                    if delta_x != 0 or delta_y != 0:
-                        R, _ = cv2.Rodrigues(rvec)
-                        R_cam2world = - R.T @ tvec
-                        forward_vec = R_cam2world @ np.array[0,1,1]
-                        robot_heading = math.atan2(forward_vec[1], forward_vec[0]) #y,x
-
-                if distance < REACHED_THRESHOLD:
-                    send_command("stop")
-                else:
-                    angle_to_target = math.atan2(dy, dx)
-                    heading_error = angle_to_target - robot_heading
-                    heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error)) # Normalize to get the shortets rotation 
-                    heading_error = math.degrees(heading_error)
-
-                # Simple steering logic
-                if distance < REACHED_THRESHOLD:
-                    send_command("stop")
-                    print("=== Reached Target ===")
-                else:
-                    if abs(heading_error) < math.degrees(5):
-                        send_command("forward")
-                    elif heading_error > math.radians(5):
-                        send_command("leftShort")
-                        # send_command("forward")
-                    elif heading_error < -math.radians(5):
-                        send_command("rightShort")
-                        # send_command("forward")
-
-                previous_pos = current_pos
-
-                cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
-            
-                    print(f"Filtered Camera Position -> X: {x:.4f}, Y: {y:.4f}, Z: {z:.4f}")
-    
             else:
-                # print("[ERROR] twoDArray or threeDArray is None!")
-                send_command("stop")
-
-            if _gui_available:
-                cv2.imshow("Detection", frame)
-    
+                print("[ERROR] twoDArray or threeDArray is None!")
+                
+            cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 stop_event.set()  # <<<<<< Tell all threads to stop
                 break
-            time.sleep(0.02)
 
     cv2.destroyAllWindows()
 

@@ -69,6 +69,7 @@ class Camera:
     def calibrate_camera(self):
         images_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aruco_data")
         if not os.path.exists(images_folder) or not any(fname.endswith(".jpg") for fname in os.listdir(images_folder)):
+            print("📂 No images found — generating calibration data...")
             generate_data_for_calibrate()
         else:
             print("📂 Existing images detected — skipping data generating...")

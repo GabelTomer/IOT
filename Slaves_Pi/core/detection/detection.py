@@ -65,7 +65,7 @@ class Detection:
         parameters.cornerRefinementMethod = cv.aruco.CORNER_REFINE_SUBPIX
         gray = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
         corners, ids, _ = cv.aruco.detectMarkers(gray,aruco_dict,parameters=parameters)
-        aruco_markers = []
+
         foundMarkers = False
 
         if ids is not None and len(corners) > 0:
@@ -82,7 +82,6 @@ class Detection:
                            cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
                 if str(markerID) in self.known_markers:
-                    aruco_markers.append(markerID)
                     marker_center = self.known_markers[str(markerID)]
                     marker_size = 0.06  # 6 cm marker
                     half = marker_size / 2.0
@@ -104,7 +103,7 @@ class Detection:
                 twoDArray = np.array(found_2d, dtype=np.float32)
                 threeDArray = np.array(found_3d, dtype=np.float32)
                 centersArray = np.array(found_3d_centers, dtype=np.float32)
-                return corners,twoDArray, threeDArray, centersArray, frame, aruco_markers
+                return corners,twoDArray, threeDArray, centersArray, frame
 
         # If no markers are found, return None for arrays
-        return None,None, None, None, frame, None
+        return None,None, None, None, frame
