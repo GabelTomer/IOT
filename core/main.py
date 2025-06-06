@@ -181,35 +181,36 @@ def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
         while not stop_event.is_set():
             for bus, addr in zip(buses, address):
                 try:
-                    data = bus.read_i2c_block_data(addr, 0, 24)
-                    if data[0:2] == 0xFAF320:
+                    bus.write_byte(addr,0xA5)
+                    time.sleep(0.002)
+                    data = bus.read_i2c_block_data(addr, 0, 17)
+                    if bytes(data[0:2]) == bytes([0xEB, 0x90]):
                         print("[MASTER] Received:", bytes(data).hex(), len(data))
-                        counter, x, y, z, timestamp = struct.unpack('<BfffQ', bytes(data[3:]))
+                        counter, x, y, z, timestamp = struct.unpack('<BfffH', bytes(data[2:]))
                         if (counter + 1 - last_counter) % 256 == 1:
                             print("[MASTER] : No missing message")
                             last_counter = counter
-                            
+                
                         print("[MASTER] Timestamp received:", timestamp)
-                        print("[MASTER] Current time      :", time.time_ns() // 1000)
-                        print("[MASTER] Time diff (μs)    :", (time.time_ns() // 1000) - timestamp)
-                        time_now = time.time_ns() // 1000
-                        time_diff = time_now - timestamp
-                        if not any(math.isnan(v) for v in (x, y, z)) and time_diff <= POSE_UPDATE_THRESHOLD:
-                            total_x += x
-                            total_y += y
-                            total_z += z
-                            count += 1
-                        
-                        if count > 0:
-                            aggregator.update_pose((total_x, total_y, total_z), count)
-                            pose = aggregator.get_average_pose()
-                            if pose:
-                                x, y, z = pose
-                                flaskServer.updatePosition(x, y, z)
-                                print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
-                        
-                    time.sleep(0.0035)
-                         
+                        now = (time.time_ns() // 1000) & 0xFFFF
+                        print("[MASTER] Current time      :", now)
+                        time_diff = (now - timestamp) % 65536
+                        print("[MASTER] Time diff (μs)    :", time_diff)
+
+                    if not any(math.isnan(v) for v in (x, y, z)) and time_diff <= POSE_UPDATE_THRESHOLD:
+                        total_x += x
+                        total_y += y
+                        total_z += z
+                        count += 1
+                    
+                    if count > 0:
+                        aggregator.update_pose((total_x, total_y, total_z), count)
+                        pose = aggregator.get_average_pose()
+                        if pose:
+                            x, y, z = pose
+                            flaskServer.updatePosition(x, y, z)
+                            print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
+                                                 
                 except Exception as e:
                     print(f"[I2C addr {hex(addr)}] Read error: {e}")
 
