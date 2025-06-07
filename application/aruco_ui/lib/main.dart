@@ -405,19 +405,14 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
     });
   }
 
-  void saveRoomData() {
-    if (points.length < 3 || origin == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Define a shape and set an origin')),
-      );
-      return;
-    }
-
+  void saveRoomData(double width, double height) {
     final roomData = {
       'room': widget.roomName,
       'boundary':
           points.map((p) => {'x': p.dx * 0.8, 'y': p.dy * 0.4}).toList(),
       'origin': {'x': origin!.dx * 0.8, 'y': origin!.dy * 0.4},
+      'width': width,
+      'height': height,
     };
     logger.i("Saving room data: $roomData");
     sendRoomData(roomData); // ← call Flask when endpoint ready
@@ -433,6 +428,8 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
         'room': widget.roomName,
         'boundry': roomShape['boundary'],
         'origin': roomShape['origin'],
+        'width': roomShape['width'],
+        'height': roomShape['height'],
       }),
     );
     if (response.statusCode == 200) {
@@ -462,6 +459,65 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
     }
   }
 
+  void _showRoomDimensionsDialog(BuildContext context) {
+    if (points.length < 3 || origin == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Define a shape and set an origin')),
+      );
+      return;
+    }
+    final TextEditingController widthController = TextEditingController();
+    final TextEditingController heightController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: Text('Enter Room Dimensions'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: widthController,
+                  keyboardType: TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(labelText: 'Room Width (meters)'),
+                ),
+                TextField(
+                  controller: heightController,
+                  keyboardType: TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: 'Room Height (meters)',
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(), // Cancel
+                child: Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  final double? width = double.tryParse(widthController.text);
+                  final double? height = double.tryParse(heightController.text);
+
+                  if (width != null && height != null) {
+                    Navigator.of(context).pop(); // Close dialog
+
+                    saveRoomData(width, height);
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Please enter valid numbers')),
+                    );
+                  }
+                },
+                child: Text('Save'),
+              ),
+            ],
+          ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -477,7 +533,10 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
               });
             },
           ),
-          IconButton(icon: Icon(Icons.save), onPressed: saveRoomData),
+          IconButton(
+            icon: Icon(Icons.save),
+            onPressed: () => _showRoomDimensionsDialog(context),
+          ),
         ],
       ),
       body: GestureDetector(
@@ -852,11 +911,12 @@ class _RobotControl extends State<RobotControl> {
   Offset roomOrigin = Offset.zero;
   // Adjust based on your robot's IP
   final String robotIP = "192.168.1.104";
-  double pixelsPerMeter = 50.0; // Adjust based on your scale
-  Offset pixelToWorld(Offset pixel, Offset origin, double pixelsPerMeter) {
+  double pixelsPerMeterWidth = 0;
+  double pixelsPerMeterHeight = 0;
+  Offset pixelToWorld(Offset pixel, Offset origin) {
     return Offset(
-      (pixel.dx - origin.dx) / pixelsPerMeter,
-      (origin.dy - pixel.dy) / pixelsPerMeter, // Flip Y-axis
+      (pixel.dx - origin.dx) / pixelsPerMeterWidth,
+      (origin.dy - pixel.dy) / pixelsPerMeterHeight, // Flip Y-axis
     );
   }
 
@@ -941,6 +1001,9 @@ class _RobotControl extends State<RobotControl> {
 
             roomWidth = maxX - minX;
             roomHeight = maxY - minY;
+            pixelsPerMeterWidth = roomWidth / data['width'];
+            pixelsPerMeterHeight = roomHeight / data['height'];
+
             logger.i("Room boundary: $roomBoundary");
             logger.i("Room origin: $roomOrigin");
             logger.i("Room width: $roomWidth, height: $roomHeight");
@@ -1074,8 +1137,8 @@ class _RobotControl extends State<RobotControl> {
     final double maxMarkerId = 256; // Maximum marker ID
 
     Offset screenToWorld(Offset pos) {
-      double worldX = (pos.dx - roomOrigin.dx) / pixelsPerMeter;
-      double worldY = (roomOrigin.dy - pos.dy) / pixelsPerMeter; // flip Y back
+      double worldX = (pos.dx - roomOrigin.dx) / pixelsPerMeterWidth;
+      double worldY = (roomOrigin.dy - pos.dy) / pixelsPerMeterHeight; // flip Y back
       return Offset(worldX, worldY);
     }
 
@@ -1236,20 +1299,23 @@ class _RobotControl extends State<RobotControl> {
             ),
       );
     }
-bool isPointInsidePolygon(Offset point, List<Offset> polygon) {
-  int intersectCount = 0;
-  for (int j = 0; j < polygon.length; j++) {
-    Offset a = polygon[j];
-    Offset b = polygon[(j + 1) % polygon.length];
 
-    if (((a.dy > point.dy) != (b.dy > point.dy)) &&
-        (point.dx <
-            (b.dx - a.dx) * (point.dy - a.dy) / (b.dy - a.dy + 1e-10) + a.dx)) {
-      intersectCount++;
+    bool isPointInsidePolygon(Offset point, List<Offset> polygon) {
+      int intersectCount = 0;
+      for (int j = 0; j < polygon.length; j++) {
+        Offset a = polygon[j];
+        Offset b = polygon[(j + 1) % polygon.length];
+
+        if (((a.dy > point.dy) != (b.dy > point.dy)) &&
+            (point.dx <
+                (b.dx - a.dx) * (point.dy - a.dy) / (b.dy - a.dy + 1e-10) +
+                    a.dx)) {
+          intersectCount++;
+        }
+      }
+      return (intersectCount % 2 == 1); // Odd = inside
     }
-  }
-  return (intersectCount % 2 == 1); // Odd = inside
-}
+
     Future<void> sendTargetPosition(Offset target) async {
       final url =
           'http://${widget.ipAddress}:5000/update_position'; // replace with your endpoint
@@ -1268,8 +1334,8 @@ bool isPointInsidePolygon(Offset point, List<Offset> polygon) {
     }
 
     void handleMapTap(Offset tapPosition) {
-      final worldPos = screenToWorld(tapPosition);
-      sendTargetPosition(worldPos);
+    
+      sendTargetPosition(tapPosition);
     }
 
     return Scaffold(
@@ -1325,58 +1391,77 @@ bool isPointInsidePolygon(Offset point, List<Offset> polygon) {
                   height: screenHeight * 0.4,
                   child: Stack(
                     children: [
-            GestureDetector(
-  onTapUp: (TapUpDetails details) {
-    lastTapPosition = details.localPosition;
-  },
-  onTap: () async {
-    if (lastTapPosition == null) return;
+                      GestureDetector(
+                        onTapUp: (TapUpDetails details) {
+                          lastTapPosition = details.localPosition;
+                        },
+                        onTap: () async {
+                          if (lastTapPosition == null) return;
 
-    // ✅ Check if inside the room boundary
-    if (!isPointInsidePolygon(lastTapPosition!, roomBoundary)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Tapped outside the room boundary")),
-      );
-      return;
-    }
+                          // ✅ Check if inside the room boundary
+                          if (!isPointInsidePolygon(
+                            lastTapPosition!,
+                            roomBoundary,
+                          )) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  "Tapped outside the room boundary",
+                                ),
+                              ),
+                            );
+                            return;
+                          }
 
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Confirm Action'),
-        content: Text('Send Robot to tapped position?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text('Confirm'),
-          ),
-        ],
-      ),
-    );
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder:
+                                (context) => AlertDialog(
+                                  title: Text('Confirm Action'),
+                                  content: Text(
+                                    'Send Robot to tapped position?',
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed:
+                                          () => Navigator.pop(context, false),
+                                      child: Text('Cancel'),
+                                    ),
+                                    TextButton(
+                                      onPressed:
+                                          () => Navigator.pop(context, true),
+                                      child: Text('Confirm'),
+                                    ),
+                                  ],
+                                ),
+                          );
 
-    if (confirm == true) {
-      final worldPos = screenToWorld(lastTapPosition!);
-      handleMapTap(worldPos);
-    }
-  },
-  onLongPressStart: (LongPressStartDetails details) {
-    final tapPosition = details.localPosition;
+                          if (confirm == true) {
+                            final worldPos = screenToWorld(lastTapPosition!);
+                            handleMapTap(worldPos);
+                          }
+                        },
+                        onLongPressStart: (LongPressStartDetails details) {
+                          final tapPosition = details.localPosition;
 
-    // ✅ Also check for long press
-    if (!isPointInsidePolygon(tapPosition, roomBoundary)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Long press outside the room boundary")),
-      );
-      return;
-    }
+                          // ✅ Also check for long press
+                          if (!isPointInsidePolygon(
+                            tapPosition,
+                            roomBoundary,
+                          )) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  "Long press outside the room boundary",
+                                ),
+                              ),
+                            );
+                            return;
+                          }
 
-    final worldPos = screenToWorld(tapPosition);
-    showAddMarkerDialog(context, worldPos);
-  },
+                          final worldPos = screenToWorld(tapPosition);
+                          showAddMarkerDialog(context, worldPos);
+                        },
 
                         child: Container(
                           color:
@@ -1388,47 +1473,53 @@ bool isPointInsidePolygon(Offset point, List<Offset> polygon) {
                               origin: roomOrigin,
                               mapWidthMeters: roomWidth,
                               mapHeightMeters: roomHeight,
-                              pixelsPerMeter: pixelsPerMeter,
+                             
                             ),
                           ),
                         ),
                       ),
                       for (var marker in knownMarkers.entries)
-                      if (isPointInsidePolygon(worldToScreen(
-                                marker.value.position,
-                                roomOrigin,
-                                pixelsPerMeter,
-                              ), roomBoundary)) 
-                        Positioned(
-                          left:
-                              worldToScreen(
-                                marker.value.position,
-                                roomOrigin,
-                                pixelsPerMeter,
-                              ).dx -
-                              10,
-                          top:
-                              worldToScreen(
-                                marker.value.position,
-                                roomOrigin,
-                                pixelsPerMeter,
-                              ).dy -
-                              markerIconSize,
-                          child: GestureDetector(
-                            onTap:
-                                () => showEditMarkerDialog(
-                                  context,
-                                  marker.key,
+                        if (isPointInsidePolygon(
+                          worldToScreen(
+                            marker.value.position,
+                            roomOrigin,
+                            pixelsPerMeterWidth,
+                            pixelsPerMeterHeight,
+                          ),
+                          roomBoundary,
+                        ))
+                          Positioned(
+                            left:
+                                worldToScreen(
                                   marker.value.position,
-                                  marker.value.z,
-                                ),
-                            child: Icon(
-                              Icons.location_on,
-                              size: markerIconSize.toDouble(),
-                              color: Colors.red,
+                                  roomOrigin,
+                                  pixelsPerMeterWidth,
+                                  pixelsPerMeterHeight,
+                                ).dx -
+                                10,
+                            top:
+                                worldToScreen(
+                                  marker.value.position,
+                                  roomOrigin,
+                                  pixelsPerMeterWidth,
+                                  pixelsPerMeterHeight,
+                                ).dy -
+                                markerIconSize,
+                            child: GestureDetector(
+                              onTap:
+                                  () => showEditMarkerDialog(
+                                    context,
+                                    marker.key,
+                                    marker.value.position,
+                                    marker.value.z,
+                                  ),
+                              child: Icon(
+                                Icons.location_on,
+                                size: markerIconSize.toDouble(),
+                                color: Colors.red,
+                              ),
                             ),
                           ),
-                        ),
 
                       // Robot position
                       Positioned(
@@ -1436,13 +1527,15 @@ bool isPointInsidePolygon(Offset point, List<Offset> polygon) {
                             worldToScreen(
                               Offset(robotX, robotY),
                               roomOrigin,
-                              pixelsPerMeter,
+                              pixelsPerMeterWidth,
+                              pixelsPerMeterHeight,
                             ).dx,
                         top:
                             worldToScreen(
                               Offset(robotX, robotY),
                               roomOrigin,
-                              pixelsPerMeter,
+                              pixelsPerMeterWidth,
+                              pixelsPerMeterHeight,
                             ).dy -
                             robotIconSize,
                         child: Icon(
@@ -1515,10 +1608,11 @@ bool isPointInsidePolygon(Offset point, List<Offset> polygon) {
   }
 }
 
-Offset worldToScreen(Offset world, Offset origin, double pixelsPerMeter) {
+Offset worldToScreen(Offset world, Offset origin, double pixelsPerMeterWidth,
+    double pixelsPerMeterHeight) {
   return Offset(
-    (origin.dx + world.dx * pixelsPerMeter),
-    origin.dy - world.dy * pixelsPerMeter, // Flip Y-axis
+    (origin.dx + world.dx * pixelsPerMeterWidth),
+    origin.dy - world.dy * pixelsPerMeterHeight, // Flip Y-axis
   );
 }
 
@@ -1556,24 +1650,21 @@ class RoomPainterMap extends CustomPainter {
   final Offset origin; // in world meters
   final double mapWidthMeters;
   final double mapHeightMeters;
-  final double pixelsPerMeter; // Adjust based on your scal
+ // Adjust based on your scal
 
   RoomPainterMap({
     required this.boundaryPoints,
     required this.origin,
     required this.mapWidthMeters,
     required this.mapHeightMeters,
-    required this.pixelsPerMeter,
+
   });
-
-
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint =
         Paint()
-        ..color = Colors.blue[50]!
-        
+          ..color = Colors.blue[50]!
           ..style = PaintingStyle.fill;
 
     if (boundaryPoints.length < 3) return;
