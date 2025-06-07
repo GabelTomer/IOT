@@ -56,7 +56,7 @@ class Detection:
         if room in data:
             data = data[room]
             for  marker, values in data.items():
-                if marker == "origin" or marker == "boundry":
+                if marker == "origin" or marker == "boundry" or marker == "width" or marker == "height":
                     # Skip origin and boundary markers
                     continue
                 if isinstance(values, dict):

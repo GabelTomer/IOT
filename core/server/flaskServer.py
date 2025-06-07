@@ -103,14 +103,17 @@ class server:
             room_name = str(data.get("room"))
             boundry = data.get("boundry")
             origin = data.get("origin")
-
-            if None in [room_name, boundry, origin]:
+            width = data.get("width")
+            height = data.get("height")
+            if None in [room_name, boundry, origin, width, height]:
                 return jsonify({"error": "Missing fields"}), 400
 
             markers = self.known_markers[room_name]
             markers.update({
                 "boundry": boundry,
-                "origin": origin
+                "origin": origin,
+                "width": width,
+                "height": height
             })
             self.save_markers(self.known_markers, room=room_name)
             return jsonify({"status": "updated", "room": room_name}), 200
