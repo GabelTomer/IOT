@@ -219,15 +219,19 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
     lost_packages = {addr: 0 for addr in addresses}
     packages = {addr: 0 for addr in addresses}
     pose_temp = {}
-    delay_time = MIN_DELAY_TIME
-    try:
-        time_diff = 0.0
-        while not stop_event.is_set():
+    wait_for_all_slaves = set()    
+    time_diff = 0.0
+    while not stop_event.is_set():
+        try:
             # Wait for any ready event
             for addr in addresses:
+                bus = buses[addresses.index(addr)]
+                if addr not in wait_for_all_slaves:
+                    bus.write_byte(addr, 0xA5)
+                    wait_for_all_slaves.add(addr)
+                    
                 if ready_flags[addr].is_set():
                     ready_flags[addr].clear()
-                    bus = buses[addresses.index(addr)]
                     try:
                         data = bus.read_i2c_block_data(addr, 0, 16)
                         if bytes(data[0:2]) == bytes([0xEB,0x90]):
@@ -242,11 +246,8 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
                                 
                                 last_counters[addr] = pose_temp[addr]['counter']
                                 acc = 100 - ((lost_packages[addr] / packages[addr]) * 100)
-                                if acc >= 99:
-                                    delay_time = max(delay_time * 0.995, MIN_DELAY_TIME)
-                                else:
-                                    delay_time = max(delay_time * 1.005, MAX_DELAY_TIME)
-                                    
+                                print(f"The Accuracy of receiving messages are : {acc}%")
+        
                             elif packet_type == 0x02:
                                 if addr in pose_temp and pose_temp[addr]['counter'] == counter:
                                     timestamp = struct.unpack('<Q', bytes(data[4:12]))[0]
@@ -256,7 +257,7 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
                                     time_diff = (now - timestamp)
                                     print(f"[MASTER addr {hex(addr)}] Time diff (μs)    :", time_diff)
                             
-                                    if not any(math.isnan(v) for v in pose_temp[addr]['pose']) and time_diff <= POSE_UPDATE_THRESHOLD:
+                                    if not any(math.isnan(v) for v in pose_temp[addr]['pose']) and 0 <= time_diff <= POSE_UPDATE_THRESHOLD:
                                         aggregator.update_pose((x, y, z))
                                         pose = aggregator.get_average_pose()
                                         if pose:
@@ -267,8 +268,8 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
                     except Exception as e:
                         print(f"[I2C addr {hex(addr)}] Read error: {e}")
                         
-    except Exception as e:
-        print(f"[I2C Listener] Fatal error: {e}")
+        except Exception as e:
+            print(f"[I2C Listener] Fatal error: {e}")
                    
 def main():
     #generate_aruco_board()
