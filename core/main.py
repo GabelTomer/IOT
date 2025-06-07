@@ -15,12 +15,29 @@ import json
 import smbus2
 import math
 import select
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import pandas as pd
+import RPi.GPIO as GPIO
 
 POSE_UPDATE_THRESHOLD = 40000.0
 GENERATE_ARUCO_BOARD = True
 MIN_DELAY_TIME = 0.0025
 MAX_DELAY_TIME = 0.006
-ALPHA = 0.05
+
+SLAVE_CONFIG = {
+    0x08: 18,  # Pi2: address 0x08, interrupt pin 12
+    0x09: 19,  # Pi3: address 0x09, interrupt pin 35
+}
+
+# GPIO setup and interrupt handling for data ready (per slave)
+GPIO.setmode(GPIO.BCM)
+ready_flags = {}
+
+def make_callback(addr):
+    def callback(channel):
+        ready_flags[addr].set()
+    return callback
 
 def runServer(flaskServer : server):
     
@@ -169,52 +186,65 @@ def receive_from_clients(method, aggregator, flaskServer, stop_event):
         threading.Thread(target=wifi_listener_enqueue, args=(pose_queue, ports), daemon=True).start()
         threading.Thread(target=wifi_processor_dequeue, args=(pose_queue, aggregator, flaskServer), daemon=True).start()
     elif method == 'i2c':
-        bus_pi2 = smbus2.SMBus(1)
-        bus_pi3 = smbus2.SMBus(3)
-        addr_pi2 = 0x08
-        addr_pi3 = 0x09
-        threading.Thread(target=i2c_listener, args=([bus_pi2, bus_pi3], [addr_pi2, addr_pi3], aggregator, flaskServer, stop_event), daemon=True).start()
+        # Map addresses to bus numbers
+        bus_map = {0x08: smbus2.SMBus(1), 0x09: smbus2.SMBus(3)}
+        addrs = list(SLAVE_CONFIG.keys())
+        buses = [bus_map[addr] for addr in addrs]
+        threading.Thread(target=i2c_listener, args=(buses, addrs, aggregator, flaskServer, stop_event), daemon=True).start()
 
-def i2c_listener(buses, address, aggregator, flaskServer, stop_event):
-    last_counter = 0
-    lost_packages = packages = 0
+def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
+    last_counters = {addr: 0 for addr in addresses}
+    lost_packages = {addr: 0 for addr in addresses}
+    packages = {addr: 0 for addr in addresses}
+    pose_temp = {}
     delay_time = MIN_DELAY_TIME
     try:
         time_diff = 0.0
         while not stop_event.is_set():
-            for bus, addr in zip(buses, address):
-                try:
-                    bus.write_byte(addr,0xA5)
-                    time.sleep(delay_time)
-                    data = bus.read_i2c_block_data(addr, 0, 17)
-                    if bytes(data[0:2]) == bytes([0xEB, 0x90]):
-                        packages += 1
-                        print("[MASTER] Received:", bytes(data).hex(), len(data))
-                        counter, x, y, z, timestamp = struct.unpack('<BfffH', bytes(data[2:]))
-                        if ((counter - last_counter) % 256) != 1:
-                            lost_packages += ((counter - last_counter) % 256)
-                        acc = 100 - ((lost_packages / packages) * 100)
-                        if acc >= 99:
-                            delay_time = max(delay_time * 0.995, MIN_DELAY_TIME)
-                        else:
-                            delay_time = max(delay_time * 1.005, MAX_DELAY_TIME)
-                        print("[MASTER] Timestamp received:", timestamp)
-                        now = (time.time_ns() // 1000) & 0xFFFF
-                        print("[MASTER] Current time      :", now)
-                        time_diff = (now - timestamp) % 65536
-                        print("[MASTER] Time diff (μs)    :", time_diff)
-
-                    if not any(math.isnan(v) for v in (x, y, z)) and time_diff <= POSE_UPDATE_THRESHOLD:
-                        aggregator.update_pose((x, y, z))
-                        pose = aggregator.get_average_pose()
-                        if pose:
-                            x, y, z = pose
-                            flaskServer.updatePosition(x, y, z)
-                            print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
-                                                 
-                except Exception as e:
-                    print(f"[I2C addr {hex(addr)}] Read error: {e}")
-
+            # Wait for any ready event
+            for addr in addresses:
+                if ready_flags[addr].is_set():
+                    ready_flags[addr].clear()
+                    bus = buses[addresses.index(addr)]
+                    try:
+                        data = bus.read_i2c_block_data(addr, 0, 16)
+                        if bytes(data[0:2]) == bytes([0xEB,0x90]):
+                            packages[addr] += 1
+                            print(f"[MASTER addr {hex(addr)}] Received:", bytes(data).hex(), len(data))
+                            counter, packet_type = struct.unpack('<BB', bytes(data[2:4]))
+                            if packet_type == 0x01: 
+                                x, y, z = struct.unpack('<fff', bytes(data[4:16]))
+                                pose_temp[addr] = {'counter': counter, 'pose': (x, y, z)}
+                                if ((pose_temp[addr]['counter'] - last_counters[addr]) % 256) != 1:
+                                    lost_packages[addr] += ((pose_temp[addr]['counter'] - last_counters[addr]) % 256)
+                                
+                                last_counters[addr] = pose_temp[addr]['counter']
+                                acc = 100 - ((lost_packages[addr] / packages[addr]) * 100)
+                                if acc >= 99:
+                                    delay_time = max(delay_time * 0.995, MIN_DELAY_TIME)
+                                else:
+                                    delay_time = max(delay_time * 1.005, MAX_DELAY_TIME)
+                                    
+                            elif packet_type == 0x02:
+                                if addr in pose_temp and pose_temp[addr]['counter'] == counter:
+                                    timestamp = struct.unpack('<Q', bytes(data[4:12]))[0]
+                                    print(f"[MASTER addr {hex(addr)}] Timestamp received:", timestamp)
+                                    now = (time.time_ns() // 1000)
+                                    print(f"[MASTER addr {hex(addr)}] Current time      :", now)
+                                    time_diff = (now - timestamp)
+                                    print(f"[MASTER addr {hex(addr)}] Time diff (μs)    :", time_diff)
+                            
+                                    if not any(math.isnan(v) for v in pose_temp[addr]['pose']) and time_diff <= POSE_UPDATE_THRESHOLD:
+                                        aggregator.update_pose((x, y, z))
+                                        pose = aggregator.get_average_pose()
+                                        if pose:
+                                            x, y, z = pose
+                                            flaskServer.updatePosition(x, y, z)
+                                            print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
+                    
+                    except Exception as e:
+                        print(f"[I2C addr {hex(addr)}] Read error: {e}")
+                        
     except Exception as e:
         print(f"[I2C Listener] Fatal error: {e}")
                    
@@ -245,6 +275,11 @@ def main():
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     
     server_thread.start()
+    
+    for addr, pin in SLAVE_CONFIG.items():
+        GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+        ready_flags[addr] = threading.Event()
+        GPIO.add_event_detect(pin, GPIO.RISING, callback=make_callback(addr))
     
     # Choose communication method: 'wifi' or 'i2c'
     communication_method = 'i2c'  # ← change to 'i2c' when needed
@@ -278,6 +313,12 @@ def main():
     # Initial state (0 position, 0 velocity)
     kalman.statePost = np.zeros((6, 1), dtype=np.float32)
     filtered_pos = 0
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    poses_log = []
+    plt.ion()
+
     while True:
 
             ret, frame = video.read()
@@ -335,12 +376,12 @@ def main():
                         kalman.correct(measured)
                         predicted = kalman.predict()
                         filtered_pos = predicted[:3]
-                
+
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
                 aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]))
                 pose = aggregator.get_average_pose()
                 if pose is not None:
-                    x,y,z = pose
+                    x, y, z = pose
                     # Update server with smoothed average
                     flaskServer.updatePosition(x, y, z)
                     #print Average Camera Position

@@ -22,6 +22,19 @@ GENERATE_ARUCO_BOARD = True
 
 CAMERA_ROTATION_DEG = 90  # or any angle
 theta = np.radians(CAMERA_ROTATION_DEG)
+DATA_READY_GPIO = 17
+
+def try_send_data(data, data_len):
+    status, _, _ = slave.pi.bsc_i2c(slave.address, data)
+    tx_data_size = (status >> 6)
+    if tx_data_size == data_len:
+        slave.pi.write(DATA_READY_GPIO, 1)
+        return True
+    else:
+        return False
+
+def clear_data_ready_signal():
+    slave.pi.write(DATA_READY_GPIO, 0)
 
 HEADER = 0xEB90
 
@@ -32,24 +45,43 @@ R_to_main = np.array([
 ])
 
 data_queue = queue.Queue(maxsize = 500)
+time_queue = queue.Queue(maxsize = 500)
+#aruco_detect_queue = queue.Queue(maxsize = 500)
 payload_lock = threading.Lock()
 payload_data = None
 counter = 0
-slave = SimpleI2CSlave(SLAVE_ADDRESS)
+slave = SimpleI2CSlave(SLAVE_ADDRESS, DATA_READY_GPIO)
 
 def slave_listener(stop_event):
-    data = None
-    global data_queue
+    global data_queue, time_queue
+    is_pose_turn = True
+    push_new_data = True  # allow sending new data
     try:
         while not stop_event.is_set():
             status, bytes_read, rx_data = slave.pi.bsc_i2c(slave.address)
-            if bytes_read > 0 and rx_data[0] == 0xA5:
-                with payload_lock:
-                    if not data_queue.empty():
-                        data = data_queue.get()
-                        print(bytes(data).hex())
-                        slave.pi.bsc_i2c(slave.address, data)
-            
+
+            # Master read acknowledgment
+            if bytes_read > 0 and rx_data[0] == 0x00:
+                push_new_data = True  # Master read previous packet
+                clear_data_ready_signal()
+
+            if push_new_data:
+                if is_pose_turn and not data_queue.empty():
+                    data = data_queue.queue[0]  # Peek
+                elif not is_pose_turn and not time_queue.empty():
+                    data = time_queue.queue[0]
+                else:
+                    continue
+
+                if try_send_data(data, len(data)):
+                    if is_pose_turn:
+                        data_queue.get()  # Remove after successful send
+                    else:
+                        time_queue.get()
+                        
+                    is_pose_turn = not is_pose_turn
+                    push_new_data = False
+                    
     except KeyboardInterrupt:
         slave.close()
 
@@ -253,22 +285,24 @@ def main():
                         
                 pose_global = (R_to_main @ filtered_pos).flatten()
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
-                with payload_lock:
-                    if not data_queue.full():
-                        counter = (counter + 1) % 256
-                        payload_data = struct.pack('<BBBfffH', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, pose_global[0], pose_global[1], pose_global[2], ((time.time_ns() // 1000) & 0xFFFF))
-                        data_queue.put(payload_data)
+                if (not data_queue.full()) and (not time_queue.full()):
+                    counter = (counter + 1) % 256
+                    payload_data = struct.pack('<BBBBfff', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x01, pose_global[0], pose_global[1], pose_global[2])
+                    data_queue.put(payload_data)
+                    payload_data = struct.pack('<BBBBQ', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x02, ((time.time_ns() // 1000)))
+                    time_queue.put(payload_data)
                 send_pose(COMMUNICATION_METHOD, tuple(pose_global))
                 #print Average Camera Position
                 print(f"Filtered Camera Position -> X: {pose_global[0]:.2f}, Y: {pose_global[1]:.2f}, Z: {pose_global[2]:.2f}")
     
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
-                with payload_lock:
-                    if not data_queue.full():
-                        counter = (counter + 1) % 256
-                        payload_data = struct.pack('<BBBfffH', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, math.nan, math.nan, math.nan, ((time.time_ns() // 1000) & 0xFFFF))
-                        data_queue.put(payload_data)
+                if (not data_queue.full()) and (not time_queue.full()):
+                    counter = (counter + 1) % 256
+                    payload_data = struct.pack('<BBBBfff', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x01, math.nan, math.nan, math.nan)
+                    data_queue.put(payload_data)
+                    payload_data = struct.pack('<BBBBQ', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x02, ((time.time_ns() // 1000)))
+                    time_queue.put(payload_data)
                 
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
