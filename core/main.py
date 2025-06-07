@@ -12,7 +12,9 @@ from server.flaskServer import server
 import random
 import socket
 import json
+
 import smbus2
+
 import math
 import select
 
@@ -238,15 +240,19 @@ def main():
 
     flaskServer = server(port = 5000)
     stop_event = threading.Event()
+
     aggregator = PoseAggregator()
+
     
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     
     server_thread.start()
     
     # Choose communication method: 'wifi' or 'i2c'
+
     communication_method = 'i2c'  # ← change to 'i2c' when needed
     receive_from_clients(communication_method, aggregator, flaskServer, stop_event)
+
     
     video = cv2.VideoCapture(0)
     if not video.isOpened():
@@ -345,8 +351,7 @@ def main():
                     #print Average Camera Position
                     print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
     
-            else:
-                print("[ERROR] twoDArray or threeDArray is None!")
+
                 
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -357,6 +362,7 @@ def main():
 
     #Now wait for all threads to end
     server_thread.join()
+    #averaging_thread.join()
 
 if __name__ == "__main__":
     main()
