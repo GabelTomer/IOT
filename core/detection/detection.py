@@ -56,6 +56,9 @@ class Detection:
         if room in data:
             data = data[room]
             for  marker, values in data.items():
+                if marker == "origin" or marker == "boundry":
+                    # Skip origin and boundary markers
+                    continue
                 if isinstance(values, dict):
                     # Extract x, y, z from dict
                     known_markers[str(marker)] = np.array([values["x"], values["y"], values["z"]], dtype=np.float32)

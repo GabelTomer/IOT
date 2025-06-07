@@ -97,6 +97,23 @@ class server:
             self.save_markers(self.known_markers, room=room)
             return jsonify({"status": "updated", "id": marker_id}), 200
         
+        @self.app.route('/change_room_shape', methods=['POST'])
+        def change_room_shape():
+            data = request.get_json()
+            room_name = str(data.get("room"))
+            boundry = data.get("boundry")
+            origin = data.get("origin")
+
+            if None in [room_name, boundry, origin]:
+                return jsonify({"error": "Missing fields"}), 400
+
+            markers = self.known_markers[room_name]
+            markers.update({
+                "boundry": boundry,
+                "origin": origin
+            })
+            self.save_markers(self.known_markers, room=room_name)
+            return jsonify({"status": "updated", "room": room_name}), 200
         
         @self.app.route('/delete_room', methods=['POST'])
         def delete_room():
