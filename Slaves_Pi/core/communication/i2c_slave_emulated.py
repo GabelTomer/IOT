@@ -15,15 +15,6 @@ class SimpleI2CSlave:
         self.pi.write(data_gpio, 0)
         print(f"I2C slave ready on address 0x{address:X}")
 
-    def listen_and_respond(self, data_bytes):
-        try:
-            status, bytes_read, rx_data = self.pi.bsc_i2c(self.address)
-            if bytes_read > 0:
-                print(f"Received: {rx_data}")
-                self.pi.bsc_i2c(self.address, data_bytes)
-        except KeyboardInterrupt:
-            self.close()
-
     def close(self):
         self.pi.bsc_i2c(0)  # disable BSC peripheral
         self.pi.stop()

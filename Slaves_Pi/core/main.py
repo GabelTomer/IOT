@@ -23,6 +23,20 @@ GENERATE_ARUCO_BOARD = True
 CAMERA_ROTATION_DEG = 90  # or any angle
 theta = np.radians(CAMERA_ROTATION_DEG)
 DATA_READY_GPIO = 17
+HEADER = 0xEB90
+
+R_to_main = np.array([
+    [ np.cos(theta), 0, np.sin(theta)],
+    [ 0,             1, 0            ],
+    [-np.sin(theta), 0, np.cos(theta)]
+])
+
+data_queue = queue.Queue(maxsize = 500)
+aruco_detect_queue = queue.Queue(maxsize = 500)
+payload_lock = threading.Lock()
+payload_data = None
+counter = 0
+slave = SimpleI2CSlave(SLAVE_ADDRESS, DATA_READY_GPIO)
 
 def try_send_data(data, data_len):
     slave.pi.bsc_i2c(slave.address, data)
@@ -36,25 +50,10 @@ def try_send_data(data, data_len):
 
 def clear_data_ready_signal():
     slave.pi.write(DATA_READY_GPIO, 0)
-
-HEADER = 0xEB90
-
-R_to_main = np.array([
-    [ np.cos(theta), 0, np.sin(theta)],
-    [ 0,             1, 0            ],
-    [-np.sin(theta), 0, np.cos(theta)]
-])
-
-data_queue = queue.Queue(maxsize = 500)
-time_queue = queue.Queue(maxsize = 500)
-#aruco_detect_queue = queue.Queue(maxsize = 500)
-payload_lock = threading.Lock()
-payload_data = None
-counter = 0
-slave = SimpleI2CSlave(SLAVE_ADDRESS, DATA_READY_GPIO)
-
+    
 def slave_listener(stop_event):
-    global data_queue, time_queue
+    slave.pi.write(DATA_READY_GPIO, 1)
+    global data_queue, aruco_detect_queue
     is_pose_turn = True
     game_start = False
     push_new_data = True  # allow sending new data
@@ -62,6 +61,7 @@ def slave_listener(stop_event):
         while not stop_event.is_set():
             status, bytes_read, rx_data = slave.pi.bsc_i2c(slave.address)
             if not game_start and bytes_read > 0 and rx_data[0] == 0xA5:
+                slave.pi.write(DATA_READY_GPIO, 0)
                 game_start = True
             
             if game_start:
@@ -73,8 +73,8 @@ def slave_listener(stop_event):
                 if push_new_data:
                     if is_pose_turn and not data_queue.empty():
                         data = data_queue.queue[0]  # Peek
-                    elif not is_pose_turn and not time_queue.empty():
-                        data = time_queue.queue[0]
+                    elif not is_pose_turn and not aruco_detect_queue.empty():
+                        data = aruco_detect_queue.queue[0]
                     else:
                         continue
 
@@ -82,7 +82,7 @@ def slave_listener(stop_event):
                         if is_pose_turn:
                             data_queue.get()  # Remove after successful send
                         else:
-                            time_queue.get()
+                            aruco_detect_queue.get()
                             
                         is_pose_turn = not is_pose_turn
                         push_new_data = False
@@ -179,7 +179,7 @@ def send_pose(method, pose):
 
 def main():
     
-    global counter,payload_data,data_queue
+    global counter, payload_data, data_queue, aruco_detect_queue
     if GENERATE_ARUCO_BOARD:
         try:
             generate_aruco_board()
@@ -236,7 +236,7 @@ def main():
             if not ret:
                 break
             
-            corners, twoDArray, threeDArray, threeDCenters, frame = detector.aruco_detect(frame=frame)
+            corners, twoDArray, threeDArray, threeDCenters, frame, aruco_ids = detector.aruco_detect(frame=frame)
             
             if twoDArray is not None and threeDArray is not None:
                 if twoDArray.shape[0] < 3:
@@ -290,24 +290,33 @@ def main():
                         
                 pose_global = (R_to_main @ filtered_pos).flatten()
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
-                if (not data_queue.full()) and (not time_queue.full()):
+                if (not data_queue.full()) and (not aruco_detect_queue.full()):
                     counter = (counter + 1) % 256
-                    payload_data = struct.pack('<BBBBfff', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x01, pose_global[0], pose_global[1], pose_global[2])
+                    aruco_id_list = aruco_ids.flatten().tolist() if aruco_ids is not None else []
+                    aruco_id_list = aruco_id_list[:12]
+                    num_of_aruco_ids = len(aruco_id_list)
+                    pose = np.array(pose_global, dtype = np.float16).view(np.uint16)
+                    timestamp = (time.time_ns() // 1000) & 0xFFFFFFFF
+                    payload_data = struct.pack('<BBBB3HI', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x01, pose[0], pose[1], pose[2], timestamp)
                     data_queue.put(payload_data)
-                    payload_data = struct.pack('<BBBQ', (HEADER & 0xFF), counter, 0x02, ((time.time_ns() // 1000)))
-                    time_queue.put(payload_data)
-                send_pose(COMMUNICATION_METHOD, tuple(pose_global))
+                    payload_data = struct.pack(f'<BBBB{num_of_aruco_ids}B', ((HEADER >> 8) & 0xFF),  (HEADER & 0xFF), counter, 0x02, *aruco_id_list)
+                    aruco_detect_queue.put(payload_data)
+    
+                #send_pose(COMMUNICATION_METHOD, tuple(pose_global))
                 #print Average Camera Position
                 print(f"Filtered Camera Position -> X: {pose_global[0]:.2f}, Y: {pose_global[1]:.2f}, Z: {pose_global[2]:.2f}")
     
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
-                if (not data_queue.full()) and (not time_queue.full()):
+                if (not data_queue.full()) and (not aruco_detect_queue.full()):
                     counter = (counter + 1) % 256
-                    payload_data = struct.pack('<BBBBfff', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x01, math.nan, math.nan, math.nan)
+                    # Create float16 NaNs for x, y, z
+                    pose_nan = np.array([np.nan, np.nan, np.nan], dtype=np.float16).view(np.uint16)
+                    timestamp = (time.time_ns() // 1000) & 0xFFFFFFFF
+                    payload_data = struct.pack('<BBBB3HI', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x01, pose_nan[0], pose_nan[0], pose_nan[0], timestamp)
                     data_queue.put(payload_data)
-                    payload_data = struct.pack('<BBBQ', (HEADER & 0xFF), counter, 0x02, ((time.time_ns() // 1000)))
-                    time_queue.put(payload_data)
+                    payload_data = struct.pack('<BBBB', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x02, 0)
+                    aruco_detect_queue.put(payload_data)
                 
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
