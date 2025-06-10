@@ -299,7 +299,7 @@ def main():
                     timestamp = (time.time_ns() // 1000) & 0xFFFFFFFF
                     payload_data = struct.pack('<BBBB3HI', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x01, pose[0], pose[1], pose[2], timestamp)
                     data_queue.put(payload_data)
-                    payload_data = struct.pack(f'<BBBB{num_of_aruco_ids}B', ((HEADER >> 8) & 0xFF),  (HEADER & 0xFF), counter, 0x02, *aruco_id_list)
+                    payload_data = struct.pack(f'<BBBBB{num_of_aruco_ids}B', ((HEADER >> 8) & 0xFF),  (HEADER & 0xFF), counter, 0x02, num_of_aruco_ids, *aruco_id_list)
                     aruco_detect_queue.put(payload_data)
     
                 #send_pose(COMMUNICATION_METHOD, tuple(pose_global))
