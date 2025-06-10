@@ -204,9 +204,12 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
             # Wait for any ready event
             for addr in addresses:
                 bus = buses[addresses.index(addr)]
-                if addr not in wait_for_all_slaves:
+                if addr not in wait_for_all_slaves and GPIO.input(SLAVE_CONFIG[addr]) == GPIO.HIGH:
                     bus.write_byte(addr, 0xA5)
                     wait_for_all_slaves.add(addr)
+                    
+                if GPIO.input(SLAVE_CONFIG[addr]) == GPIO.HIGH:
+                    ready_flags[addr].set()
                     
                 if ready_flags[addr].is_set():
                     ready_flags[addr].clear()
@@ -216,8 +219,14 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
                             packages[addr] += 1
                             print(f"[MASTER addr {hex(addr)}] Received:", bytes(data).hex(), len(data))
                             counter, packet_type = struct.unpack('<BB', bytes(data[2:4]))
-                            if packet_type == 0x01: 
-                                x, y, z = struct.unpack('<fff', bytes(data[4:16]))
+                            
+                            if packet_type == 0x01:
+                                x, y, z, timestamp = struct.unpack('<3HI', bytes(data[4:14]))
+                                # Convert the 16-bit raw integers back into float16
+                                pose_f16 = np.array([x, y, z], dtype=np.uint16).view(np.float16)
+                                # convert to float32 for better precision
+                                pose_f32 = pose_f16.astype(np.float32)
+                                x, y, z = pose_f32[0], pose_f32[1], pose_f32[2]
                                 pose_temp[addr] = {'counter': counter, 'pose': (x, y, z)}
                                 if ((pose_temp[addr]['counter'] - last_counters[addr]) % 256) != 1:
                                     lost_packages[addr] += ((pose_temp[addr]['counter'] - last_counters[addr]) % 256)
@@ -225,23 +234,24 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
                                 last_counters[addr] = pose_temp[addr]['counter']
                                 acc = 100 - ((lost_packages[addr] / packages[addr]) * 100)
                                 print(f"The Accuracy of receiving messages are : {acc}%")
-        
+                                timestamp = struct.unpack('<Q', bytes(data[4:12]))[0]
+                                print(f"[MASTER addr {hex(addr)}] Timestamp received:", timestamp)
+                                now = (time.time_ns() // 1000) & 0xFFFFFFFF
+                                print(f"[MASTER addr {hex(addr)}] Current time      :", now)
+                                time_diff = (now - timestamp) & 0xFFFFFFFF
+                                print(f"[MASTER addr {hex(addr)}] Time diff (μs)    :", time_diff)
+                            
+                                if not any(np.isnan(pose_temp[addr]['pose'])) and 0 <= time_diff <= POSE_UPDATE_THRESHOLD:
+                                    aggregator.update_pose((x, y, z))
+                                    pose = aggregator.get_average_pose()
+                                    if pose:
+                                        x, y, z = pose
+                                        flaskServer.updatePosition(x, y, z)
+                                        print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
+                            
                             elif packet_type == 0x02:
                                 if addr in pose_temp and pose_temp[addr]['counter'] == counter:
-                                    timestamp = struct.unpack('<Q', bytes(data[4:12]))[0]
-                                    print(f"[MASTER addr {hex(addr)}] Timestamp received:", timestamp)
-                                    now = (time.time_ns() // 1000)
-                                    print(f"[MASTER addr {hex(addr)}] Current time      :", now)
-                                    time_diff = (now - timestamp)
-                                    print(f"[MASTER addr {hex(addr)}] Time diff (μs)    :", time_diff)
-                            
-                                    if not any(math.isnan(v) for v in pose_temp[addr]['pose']) and 0 <= time_diff <= POSE_UPDATE_THRESHOLD:
-                                        aggregator.update_pose((x, y, z))
-                                        pose = aggregator.get_average_pose()
-                                        if pose:
-                                            x, y, z = pose
-                                            flaskServer.updatePosition(x, y, z)
-                                            print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
+                                    pass
                     
                     except Exception as e:
                         print(f"[I2C addr {hex(addr)}] Read error: {e}")
