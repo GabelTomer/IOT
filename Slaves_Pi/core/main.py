@@ -38,11 +38,33 @@ payload_data = None
 counter = 0
 slave = SimpleI2CSlave(SLAVE_ADDRESS, DATA_READY_GPIO)
 
-def try_send_data(data, data_len):
-    slave.pi.bsc_i2c(slave.address, data)
-    status, _, _ = slave.pi.bsc_i2c(slave.address)
-    tx_data_size = (status >> 6)
-    if tx_data_size == data_len:
+def decode_bsc_status(status: int):
+    return {
+        "bytes_copied_to_fifo": (status >> 16) & 0x1F,
+        "rx_fifo_bytes":          (status >> 11) & 0x1F,
+        "tx_fifo_bytes":          (status >> 6)  & 0x1F,
+        "tx_fifo_full":           bool((status >> 2) & 1),
+        "tx_fifo_empty":          bool((status >> 5) & 1),
+        "tx_busy":                bool((status >> 1) & 1),
+        "rx_empty":               bool((status >> 2) & 1),
+    }
+
+def flush_fifo():
+    # Send a flush command by toggling EN and TE bits off/on
+    control_off = slave.address << 16  # clears EN, TE, RE
+    slave.pi.bsc_xfer({"control": control_off, "txCnt": 0})
+    slave.pi.bsc_xfer({"control": (slave.address << 16) | 0x305, "txCnt": 0})
+    print("TX FIFO flushed")
+    
+    
+def try_send_data(addr, data, data_len):
+    flush_fifo()
+    control = (addr << 16) | 0x305  # EN + I2 + RE + TE bits
+    xfer = {"control": control, "txBuf": data, "txCnt": len(data)}
+    status, read_cnt, rx_buf = slave.pi.bsc_xfer(xfer)
+    st = decode_bsc_status(status)
+    print(f"Queued {st['bytes_copied_to_fifo']} bytes, FIFO now has {st['tx_fifo_bytes']} bytes")
+    if st['bytes_copied_to_fifo'] == data_len:
         slave.pi.write(DATA_READY_GPIO, 1)
         return True
     else:
@@ -78,7 +100,7 @@ def slave_listener(stop_event):
                     else:
                         continue
 
-                    if try_send_data(data, len(data)):
+                    if try_send_data(slave.address, data, len(data)):
                         if is_pose_turn:
                             data_queue.get()  # Remove after successful send
                         else:
@@ -124,15 +146,16 @@ def generate_aruco_board():
             if all(np.linalg.norm(candidate[:2] - p[:2]) >= (marker_size_m + min_spacing_m) for p in positions):
                 positions.append(candidate)
             attempts += 1
-            if attempts > 5000:
-                print("⚠️ Warning: Too many placement attempts. Returning what was placed.")
+            if attempts > 10000:
+                print("⚠️ Warning: Too many placement attempts. Proceeding with fewer markers.")
                 break
         return positions
 
     # Generate safe marker positions
     positions_list = generate_safe_positions(len(marker_ids), marker_size_m, min_spacing_m)
     if len(positions_list) < len(marker_ids):
-        raise RuntimeError("❌ Failed to generate safe positions for all markers.")
+        print(f"⚠️ Only {len(positions_list)} out of {len(marker_ids)} markers were placed safely.")
+        marker_ids = marker_ids[:len(positions_list)]
     positions_m = {id: pos for id, pos in zip(marker_ids, positions_list)}
 
     # Center point on canvas
@@ -316,7 +339,7 @@ def main():
                     timestamp = (time.time_ns() // 1000) & 0xFFFFFFFF
                     payload_data = struct.pack('<BBBB3HI', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x01, pose_nan[0], pose_nan[0], pose_nan[0], timestamp)
                     data_queue.put(payload_data)
-                    payload_data = struct.pack('<BBBB', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x02, 0)
+                    payload_data = struct.pack('<BBBBB', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x02, 0)
                     aruco_detect_queue.put(payload_data)
                 
             cv2.imshow("Detection", frame)
