@@ -50,18 +50,18 @@ def decode_bsc_status(status: int):
     }
 
 def flush_fifo():
-    # Send a flush command by toggling EN and TE bits off/on
-    control_off = slave.address << 16  # clears EN, TE, RE
-    slave.pi.bsc_xfer({"control": control_off, "txCnt": 0})
-    slave.pi.bsc_xfer({"control": (slave.address << 16) | 0x305, "txCnt": 0})
-    print("TX FIFO flushed")
+    empty = b''
+    control_off = slave.address << 16  # Clears EN, TE, RE
+    control_on = (slave.address << 16) | 0x305  # EN + I2C + RE + TE
+    slave.pi.bsc_xfer(control_off, empty)
+    slave.pi.bsc_xfer(control_on, empty)
+    print("✅ TX FIFO flushed")
     
     
 def try_send_data(addr, data, data_len):
     flush_fifo()
-    control = (addr << 16) | 0x305  # EN + I2 + RE + TE bits
-    xfer = {"control": control, "txBuf": data, "txCnt": len(data)}
-    status, read_cnt, rx_buf = slave.pi.bsc_xfer(xfer)
+    control = (addr << 16) | 0x305  # EN + I2C + RE + TE
+    status, rx_data = slave.pi.bsc_xfer(control, data)
     st = decode_bsc_status(status)
     print(f"Queued {st['bytes_copied_to_fifo']} bytes, FIFO now has {st['tx_fifo_bytes']} bytes")
     if st['bytes_copied_to_fifo'] == data_len:
