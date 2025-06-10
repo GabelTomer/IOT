@@ -51,7 +51,8 @@ SLAVE_CONFIG = {
     0x09: 19,  # Pi3: address 0x09, interrupt pin 35
 }
 
-known_markers = Detection.load_known_markers("core/utils/known_markers.json")
+with open("core/utils/known_markers.json", 'r') as file:
+    known_markers = json.load(file)
 
 plot_lock = threading.Lock()
 fig = plt.figure()
@@ -62,6 +63,7 @@ plt.ion()
 # GPIO setup and interrupt handling for data ready (per slave)
 GPIO.setmode(GPIO.BCM)
 ready_flags = {}
+
 
 def make_callback(addr):
     def callback(channel):
@@ -161,15 +163,16 @@ def generate_aruco_board():
             if all(np.linalg.norm(candidate[:2] - p[:2]) >= (marker_size_m + min_spacing_m) for p in positions):
                 positions.append(candidate)
             attempts += 1
-            if attempts > 5000:
-                print("⚠️ Warning: Too many placement attempts. Returning what was placed.")
+            if attempts > 10000:
+                print("⚠️ Warning: Too many placement attempts. Proceeding with fewer markers.")
                 break
         return positions
 
     # Generate safe marker positions
     positions_list = generate_safe_positions(len(marker_ids), marker_size_m, min_spacing_m)
     if len(positions_list) < len(marker_ids):
-        raise RuntimeError("❌ Failed to generate safe positions for all markers.")
+        print(f"⚠️ Only {len(positions_list)} out of {len(marker_ids)} markers were placed safely.")
+        marker_ids = marker_ids[:len(positions_list)]
     positions_m = {id: pos for id, pos in zip(marker_ids, positions_list)}
 
     # Center point on canvas
@@ -200,6 +203,55 @@ def generate_aruco_board():
     for marker_id in marker_ids:
         x, y, z = positions_m[marker_id]
         print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
+
+def generate_aruco_markers(num_markers=20, dictionary_name="DICT_4X4_50", marker_size=200, output_dir="generated_markers"):
+    """
+    Generate and save individual ArUco marker images.
+    
+    Parameters:
+    - num_markers: Number of markers to generate.
+    - dictionary_name: ArUco dictionary to use.
+    - marker_size: Size of each marker image in pixels.
+    - output_dir: Directory to save the marker images.
+    """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    aruco_dict_map = {
+        "DICT_4X4_50": cv2.aruco.DICT_4X4_50,
+        "DICT_4X4_100": cv2.aruco.DICT_4X4_100,
+        "DICT_4X4_250": cv2.aruco.DICT_4X4_250,
+        "DICT_4X4_1000": cv2.aruco.DICT_4X4_1000,
+        "DICT_5X5_50": cv2.aruco.DICT_5X5_50,
+        "DICT_5X5_100": cv2.aruco.DICT_5X5_100,
+        "DICT_5X5_250": cv2.aruco.DICT_5X5_250,
+        "DICT_5X5_1000": cv2.aruco.DICT_5X5_1000,
+        "DICT_6X6_50": cv2.aruco.DICT_6X6_50,
+        "DICT_6X6_100": cv2.aruco.DICT_6X6_100,
+        "DICT_6X6_250": cv2.aruco.DICT_6X6_250,
+        "DICT_6X6_1000": cv2.aruco.DICT_6X6_1000,
+        "DICT_7X7_50": cv2.aruco.DICT_7X7_50,
+        "DICT_7X7_100": cv2.aruco.DICT_7X7_100,
+        "DICT_7X7_250": cv2.aruco.DICT_7X7_250,
+        "DICT_7X7_1000": cv2.aruco.DICT_7X7_1000,
+        "DICT_ARUCO_ORIGINAL": cv2.aruco.DICT_ARUCO_ORIGINAL,
+        "DICT_APRILTAG_16h5": cv2.aruco.DICT_APRILTAG_16h5,
+        "DICT_APRILTAG_25h9": cv2.aruco.DICT_APRILTAG_25h9,
+        "DICT_APRILTAG_36h10": cv2.aruco.DICT_APRILTAG_36h10,
+        "DICT_APRILTAG_36h11": cv2.aruco.DICT_APRILTAG_36h11
+    }
+
+    if dictionary_name not in aruco_dict_map:
+        print(f"[ERROR] Unknown dictionary name: {dictionary_name}")
+        return
+
+    aruco_dict = cv2.aruco.getPredefinedDictionary(aruco_dict_map[dictionary_name])
+
+    for marker_id in range(num_markers):
+        marker_img = cv2.aruco.drawMarker(aruco_dict, marker_id, marker_size)
+        filename = os.path.join(output_dir, f"marker_{marker_id}.png")
+        cv2.imwrite(filename, marker_img)
+    print(f"[INFO] Generated {num_markers} ArUco markers in '{output_dir}'")
 
 def wifi_listener_enqueue(pose_queue, ports):
     sockets = []
