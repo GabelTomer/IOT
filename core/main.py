@@ -22,7 +22,7 @@ import os
 import matplotlib.patheffects as pe
 
 POSE_UPDATE_THRESHOLD = 40000.0
-GENERATE_ARUCO_BOARD = True
+GENERATE_ARUCO_BOARD = False
 
 SLAVE_CONFIG = {
     0x08: 18,  # Pi2: address 0x08, interrupt pin 12
@@ -189,6 +189,40 @@ def wifi_listener_enqueue(pose_queue, ports):
         sockets.append(sock)
         print(f"[WIFI] Listening on port {port}")
 
+    inputs = sockets.copy()
+
+    while True:
+        readable, _, _ = select.select(inputs, [], [])
+        for s in readable:
+            if s in sockets:
+                conn, addr = s.accept()
+                conn.setblocking(False)
+                inputs.append(conn)
+                print(f"[WIFI] Connected: {addr}")
+                
+            else:
+                try:
+                    data = s.recv(1024).decode()
+                    if not data:
+                        inputs.remove(s)
+                        s.close()
+                        continue
+                    pose_data = json.loads(data)
+
+                    x = pose_data.get("x")
+                    y = pose_data.get("y")
+                    z = pose_data.get("z")
+                    timestamp = pose_data.get("timestamp")
+                    aruco_list = pose_data.get("aruco_list", [])
+
+                    if None not in (x, y, z, timestamp):
+                        pose_queue.put((x, y, z, timestamp, aruco_list))
+                        
+                except Exception as e:
+                    print(f"[WIFI] Error: {e}")
+                    inputs.remove(s)
+                    s.close()
+
 def resource_path(relative_path):
     import sys, os
     if hasattr(sys, '_MEIPASS'):
@@ -225,24 +259,20 @@ def test_communication():
                     s.close()
 
 def wifi_processor_dequeue(pose_queue, aggregator, flaskServer):
-    total_x = total_y = total_z = 0.0
-    count = 0
     while True:
         if not pose_queue.empty():
-            x, y, z = pose_queue.get()
-            total_x += x
-            total_y += y
-            total_z += z
-            count += 1
-            aggregator.update_pose((total_x, total_y, total_z), count)
+            x, y, z, timestamp, aruco_list = pose_queue.get()
+            aggregator.update_pose((x, y, z))
             pose = aggregator.get_average_pose()
-            if pose:
+            time_now = time.time_ns() // 1000
+            if pose and  0 <= (time_now - timestamp) <= POSE_UPDATE_THRESHOLD:
                 x, y, z = pose
                 flaskServer.updatePosition(x, y, z)
+                update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_list, color = 'orange', marker = 'x')
 
 def receive_from_clients(method, aggregator, flaskServer, stop_event):
     if method == 'wifi':
-        pose_queue = queue.Queue()
+        pose_queue = queue.Queue(maxsize = 5000)
         ports = [6001, 6002]
         threading.Thread(target=wifi_listener_enqueue, args=(pose_queue, ports), daemon=True).start()
         threading.Thread(target=wifi_processor_dequeue, args=(pose_queue, aggregator, flaskServer), daemon=True).start()

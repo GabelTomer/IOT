@@ -164,14 +164,15 @@ def generate_aruco_board():
         x, y, z = positions_m[marker_id]
         print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
 
-def send_pose(method, pose):
+def send_pose(method, pose, aruco_list):
     x, y, z = pose
     if method == "wifi":
         pose_packet = {
             "x": x,
             "y": y,
             "z": z,
-            "timestamp": time.time()
+            "timestamp": time.time() // 1000,
+            "aruco_list" : aruco_list
         }
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.connect((HOST, PORT))
@@ -287,14 +288,14 @@ def main():
                         kalman.correct(measured)
                         predicted = kalman.predict()
                         filtered_pos = predicted[:3]
-                        
+                    
+                aruco_id_list = aruco_ids.flatten().tolist() if aruco_ids is not None else []
+                aruco_id_list = aruco_id_list[:12]
+                num_of_aruco_ids = len(aruco_id_list)
                 pose_global = (R_to_main @ filtered_pos).flatten()
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
                 if (not data_queue.full()) and (not aruco_detect_queue.full()):
                     counter = (counter + 1) % 256
-                    aruco_id_list = aruco_ids.flatten().tolist() if aruco_ids is not None else []
-                    aruco_id_list = aruco_id_list[:12]
-                    num_of_aruco_ids = len(aruco_id_list)
                     pose = np.array(pose_global, dtype = np.float16).view(np.uint16)
                     timestamp = (time.time_ns() // 1000) & 0xFFFFFFFF
                     payload_data = struct.pack('<BBBB3HI', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x01, pose[0], pose[1], pose[2], timestamp)
@@ -302,7 +303,7 @@ def main():
                     payload_data = struct.pack(f'<BBBBB{num_of_aruco_ids}B', ((HEADER >> 8) & 0xFF),  (HEADER & 0xFF), counter, 0x02, num_of_aruco_ids, *aruco_id_list)
                     aruco_detect_queue.put(payload_data)
     
-                #send_pose(COMMUNICATION_METHOD, tuple(pose_global))
+                send_pose(COMMUNICATION_METHOD, tuple(pose_global),aruco_id_list)
                 #print Average Camera Position
                 print(f"Filtered Camera Position -> X: {pose_global[0]:.2f}, Y: {pose_global[1]:.2f}, Z: {pose_global[2]:.2f}")
     
