@@ -13,22 +13,29 @@ import random
 import socket
 import json
 import smbus2
-import math
 import select
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import pandas as pd
 import RPi.GPIO as GPIO
+import os
+import matplotlib.patheffects as pe
 
 POSE_UPDATE_THRESHOLD = 40000.0
 GENERATE_ARUCO_BOARD = True
-MIN_DELAY_TIME = 0.0025
-MAX_DELAY_TIME = 0.006
 
 SLAVE_CONFIG = {
     0x08: 18,  # Pi2: address 0x08, interrupt pin 12
     0x09: 19,  # Pi3: address 0x09, interrupt pin 35
 }
+
+known_markers = Detection.load_known_markers("core/utils/known_markers.json")
+
+plot_lock = threading.Lock()
+fig = plt.figure()
+ax = fig.add_subplot(111, projection = '3d')
+poses_log = []
+plt.ion()
 
 # GPIO setup and interrupt handling for data ready (per slave)
 GPIO.setmode(GPIO.BCM)
@@ -38,6 +45,60 @@ def make_callback(addr):
     def callback(channel):
         ready_flags[addr].set()
     return callback
+
+def update_pose_visual_and_stats(title, pose, markers = None, color = 'b', marker = 'o'):
+    with plot_lock:
+        global fig, ax, poses_log
+        x, y, z = pose
+
+        # Keep history for statistics, but don't plot it all
+        poses_log.append((x, y, z))
+
+        ax.cla()
+        ax.set_title(title)
+        ax.set_xlim(-1, 1)
+        ax.set_ylim(-1, 1)
+        ax.set_zlim(0, 2)
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+
+        # Plot only the current pose
+        ax.scatter([x], [y], [z], c=color, marker=marker)
+
+        # Draw lines from each detected ArUco marker center to the current pose
+        if markers is not None:
+            for marker in markers:
+                cx, cy, cz = known_markers[str(marker)]
+                dx, dy, dz = x - cx, y - cy, z - cz
+                ax.quiver(cx, cy, cz, dx, dy, dz, color = 'r', arrow_length_ratio = 0.05)
+
+        # Overlay statistics
+        try:
+            if len(poses_log) > 1:
+                df = pd.DataFrame(poses_log, columns=["X", "Y", "Z"])
+                mean = df.mean()
+                std = df.std()
+                stats_text = (
+                    f"Mean: ({mean['X']:.2f}, {mean['Y']:.2f}, {mean['Z']:.2f})\n"
+                    f"Std:  ({std['X']:.2f}, {std['Y']:.2f}, {std['Z']:.2f})"
+                )
+                ax.text2D(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=8,
+                        verticalalignment ='top', bbox=dict(boxstyle = "round", fc = "w"),
+                        path_effects=[pe.withStroke(linewidth=1, foreground = "black")])
+                
+                # Save statistics to CSV
+                try:
+                    if len(poses_log) > 1:
+                        df.tail(1).to_csv("pose_statistics_log.csv", mode = 'a', header = not os.path.exists("pose_statistics_log.csv"), index = False)
+                
+                except Exception as e:
+                    print("[Plot Error] Failed to save stats to CSV:", e)
+                
+        except Exception as e:
+            print("[Plot Error] Failed to compute stats overlay:", e)
+
+        plt.pause(0.001)
 
 def runServer(flaskServer : server):
     
@@ -251,8 +312,13 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
                             
                             elif packet_type == 0x02:
                                 if addr in pose_temp and pose_temp[addr]['counter'] == counter:
-                                    pass
-                    
+                                    num_of_detected_aruco = struct.unpack('<B', bytes(data[4:5]))
+                                    if num_of_detected_aruco > 0:
+                                        aruco_id_list = struct.unpack(f'<{num_of_detected_aruco}B', bytes(data[5:(5 + num_of_detected_aruco)]))
+                                        pose = aggregator.get_average_pose()
+                                        if pose:
+                                            update_pose_visual_and_stats("3D Pose Estimation",pose, aruco_id_list)
+                                        
                     except Exception as e:
                         print(f"[I2C addr {hex(addr)}] Read error: {e}")
                         
@@ -278,7 +344,7 @@ def main():
             recalibrate = True
         
     detector = Detection(known_markers_path="core/utils/known_markers.json")
-
+    
     flaskServer = server(port = 5000)
     stop_event = threading.Event()
     aggregator = PoseAggregator()
@@ -325,18 +391,13 @@ def main():
     kalman.statePost = np.zeros((6, 1), dtype=np.float32)
     filtered_pos = 0
 
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    poses_log = []
-    plt.ion()
-
     while True:
 
             ret, frame = video.read()
             if not ret:
                 break
             
-            corners, twoDArray, threeDArray, threeDCenters, frame = detector.aruco_detect(frame=frame)
+            corners, twoDArray, threeDArray, threeDCenters, frame, aruco_markers_detected = detector.aruco_detect(frame=frame)
             
             if twoDArray is not None and threeDArray is not None:
                 if twoDArray.shape[0] < 3:
@@ -395,6 +456,7 @@ def main():
                     x, y, z = pose
                     # Update server with smoothed average
                     flaskServer.updatePosition(x, y, z)
+                    update_pose_visual_and_stats("3D Pose Estimation",pose, aruco_markers_detected)
                     #print Average Camera Position
                     print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
     
