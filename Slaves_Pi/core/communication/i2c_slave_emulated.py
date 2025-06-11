@@ -8,7 +8,6 @@ class SimpleI2CSlave:
         self.pi = pigpio.pi()
         if not self.pi.connected:
             raise Exception("Cannot connect to pigpiod")
-        self.handle = self.pi.bsc_i2c(address)
         self.address = address
         self.data_gpio = data_gpio
         self.pi.set_mode(data_gpio, pigpio.OUTPUT)

@@ -48,20 +48,12 @@ def decode_bsc_status(status: int):
         "tx_busy":                bool((status >> 1) & 1),
         "rx_empty":               bool((status >> 2) & 1),
     }
-
-def flush_fifo():
-    empty = b''
-    control_off = slave.address << 16  # Clears EN, TE, RE
-    control_on = (slave.address << 16) | 0x305  # EN + I2C + RE + TE
-    slave.pi.bsc_xfer(control_off, empty)
-    slave.pi.bsc_xfer(control_on, empty)
-    print("✅ TX FIFO flushed")
-    
-    
+   
 def try_send_data(addr, data, data_len):
-    flush_fifo()
-    control = (addr << 16) | 0x305  # EN + I2C + RE + TE
-    status, rx_data = slave.pi.bsc_xfer(control, data)
+    control_abort = (addr << 16) | 0x385
+    status, _, _ = slave.pi.bsc_xfer(control_abort, b'')
+    control_send = (addr << 16) | 0x305
+    status, _, _ = slave.pi.bsc_xfer(control_send, data)
     st = decode_bsc_status(status)
     print(f"Queued {st['bytes_copied_to_fifo']} bytes, FIFO now has {st['tx_fifo_bytes']} bytes")
     if st['bytes_copied_to_fifo'] == data_len:
@@ -74,6 +66,9 @@ def clear_data_ready_signal():
     slave.pi.write(DATA_READY_GPIO, 0)
     
 def slave_listener(stop_event):
+    slave_config = {
+    "control": (slave.address << 16) | 0x305,  # EN | I2C | TE | RE
+    }
     slave.pi.write(DATA_READY_GPIO, 1)
     global data_queue, aruco_detect_queue
     is_pose_turn = True
@@ -81,7 +76,7 @@ def slave_listener(stop_event):
     push_new_data = True  # allow sending new data
     try:
         while not stop_event.is_set():
-            status, bytes_read, rx_data = slave.pi.bsc_i2c(slave.address)
+            status, bytes_read, rx_data = slave.pi.bsc_xfer(slave_config)
             if not game_start and bytes_read > 0 and rx_data[0] == 0xA5:
                 slave.pi.write(DATA_READY_GPIO, 0)
                 game_start = True

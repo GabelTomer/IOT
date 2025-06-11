@@ -377,7 +377,6 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
                                 last_counters[addr] = pose_temp[addr]['counter']
                                 acc = 100 - ((lost_packages[addr] / packages[addr]) * 100)
                                 print(f"The Accuracy of receiving messages are : {acc}%")
-                                timestamp = struct.unpack('<Q', bytes(data[4:12]))[0]
                                 print(f"[MASTER addr {hex(addr)}] Timestamp received:", timestamp)
                                 now = (time.time_ns() // 1000) & 0xFFFFFFFF
                                 print(f"[MASTER addr {hex(addr)}] Current time      :", now)
