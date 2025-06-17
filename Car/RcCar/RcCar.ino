@@ -2,11 +2,11 @@
 #include <ESP8266WebServer.h>
 
 // Wi-Fi credentials
-const char* ssid = "";
-const char* password = "";
+const char* ssid = "ArucoProject";
+const char* password = "ArucoProject1!";
 
-IPAddress local_IP(192, 168, 1, 104);  // desired static IP
-IPAddress gateway(192, 168, 1, 1);     // your network gateway
+IPAddress local_IP(192, 168, 0, 104);  // desired static IP
+IPAddress gateway(192, 168, 0, 1);     // your network gateway
 IPAddress subnet(255, 255, 255, 0);    // subnet mask
 IPAddress dns(8, 8, 8, 8);             // optional, use your preferred DNS
 
@@ -110,11 +110,11 @@ String webPage = R"rawliteral(
 <button onclick="location.href='/stop'">Stop</button>
 <button onclick="location.href='/right'">Right</button><br>
 <button onclick="location.href='/backward'">Backward</button>
-<button onclick="location.href='/forward'">Forward Short</button><br>
+<button onclick="location.href='/forwardShort'">Forward Short</button><br>
 <button onclick="location.href='/leftShort'">Left Short</button>
 <button onclick="location.href='/rightShort'">Right Short</button><br>
 <button onclick="location.href='/backwardShort'">Backward Short</button>
-<button onclick="location.href='/backwardShort'">Backward Short</button>
+
 </body>
 </html>
 )rawliteral";
