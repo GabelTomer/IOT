@@ -13,7 +13,7 @@ import random
 import socket
 import json
 
-#import smbus2
+import smbus2
 
 import math
 import select
@@ -241,7 +241,7 @@ def main():
     flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector)
     stop_event = threading.Event()
 
-    #aggregator = PoseAggregator()
+    aggregator = PoseAggregator()
 
     
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
@@ -250,8 +250,8 @@ def main():
     
     # Choose communication method: 'wifi' or 'i2c'
 
-    # communication_method = 'i2c'  # ← change to 'i2c' when needed
-    # receive_from_clients(communication_method, aggregator, flaskServer, stop_event)
+    communication_method = 'i2c'  # ← change to 'i2c' when needed
+    receive_from_clients(communication_method, aggregator, flaskServer, stop_event)
 
     
     video = cv2.VideoCapture(0)
@@ -342,14 +342,14 @@ def main():
                         filtered_pos = predicted[:3]
                 
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
-                # aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]),1)
-                # pose = aggregator.get_average_pose()
-                # if pose is not None:
-                x,y,z = filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]#pose
+                aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]),1)
+                pose = aggregator.get_average_pose()
+                if pose is not None:
+                    x,y,z = pose
                     # Update server with smoothed average
-                flaskServer.updatePosition(x, y, z)
+                    flaskServer.updatePosition(x, y, z)
                     #print Average Camera Position
-                print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
+                    print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
     
 
                 
