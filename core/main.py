@@ -238,7 +238,7 @@ def main():
         
     detector = Detection(known_markers_path="core/utils/known_markers.json")
 
-    flaskServer = server(port = 5000)
+    flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector)
     stop_event = threading.Event()
 
     aggregator = PoseAggregator()
