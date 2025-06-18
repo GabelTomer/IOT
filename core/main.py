@@ -1,6 +1,5 @@
 import threading
 import struct
-import queue
 import cv2
 import time
 import numpy as np
@@ -9,100 +8,124 @@ from detection import Detection
 import sys
 from communication.pose_aggregator import PoseAggregator
 from server.flaskServer import server
-import random
-import socket
-import json
-import smbus2
-import select
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 import pandas as pd
-import RPi.GPIO as GPIO
 import os
 import matplotlib.patheffects as pe
 
-POSE_UPDATE_THRESHOLD = 40000.0
+# --- General GLOBAL Variables --- 
+POSE_UPDATE_THRESHOLD = 20000.0
 GENERATE_ARUCO_BOARD = False
+COMMUNICATION_METHOD = 'wifi'  # change to 'WiFi or i2c' when needed
 
-SLAVE_CONFIG = {
-    0x08: 18,  # Pi2: address 0x08, interrupt pin 12
-    0x09: 19,  # Pi3: address 0x09, interrupt pin 35
-}
+# --- GLOBAL Variables and Import specific Libraries for I2C ---
+if COMMUNICATION_METHOD == 'i2c':
+    import RPi.GPIO as GPIO
+    import smbus2
+    
+    SLAVE_CONFIG = {
+    0x08: 18,  # GPIO pin for Pi2 interrupt
+    0x09: 19,  # GPIO pin for Pi3 interrupt
+    }
+    # GPIO setup and interrupt handling for data ready (per slave)
+    GPIO.setmode(GPIO.BCM)
+    ready_flags = {}
 
-with open("core/utils/known_markers.json", 'r') as file:
-    known_markers = json.load(file)
+# --- GLOBAL Variables and Import specific Libraries for WiFi ---
+elif COMMUNICATION_METHOD == "wifi":
+    import socket
+    import queue
 
+
+# --- GLOBAL Variables and Intialization of 3D Visulaization ---
 plot_lock = threading.Lock()
 fig = plt.figure()
 ax = fig.add_subplot(111, projection = '3d')
 poses_log = []
 plt.ion()
-
-# GPIO setup and interrupt handling for data ready (per slave)
-GPIO.setmode(GPIO.BCM)
-ready_flags = {}
+combined_aruco_ids = set()
+aruco_ids = []
+aruco_ids_lock = threading.Lock()
+known_markers = {}
+MAX_LOG_LEN = 500
 
 
 def make_callback(addr):
+    global ready_flags
     def callback(channel):
         ready_flags[addr].set()
     return callback
 
+def plot_updater_thread(aggregator, stop_event):
+    global aruco_ids,combined_aruco_ids
+    while not stop_event.is_set():
+        pose = aggregator.get_average_pose()
+        # Update global set
+        with aruco_ids_lock:
+            aruco_ids = list(combined_aruco_ids)
+
+        # Call your visual update with all seen markers
+        update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_ids)
+        time.sleep(0.02)
+            
 def update_pose_visual_and_stats(title, pose, markers = None, color = 'b', marker = 'o'):
-    with plot_lock:
-        global fig, ax, poses_log
-        x, y, z = pose
+    global known_markers, fig, ax, poses_log
+    x, y, z = pose
 
-        # Keep history for statistics, but don't plot it all
-        poses_log.append((x, y, z))
+    # Keep history for statistics, but don't plot it all
+    if len(poses_log) > MAX_LOG_LEN:
+        poses_log.pop(0)
+    poses_log.append((x, y, z))
 
-        ax.cla()
-        ax.set_title(title)
-        ax.set_xlim(-1, 1)
-        ax.set_ylim(-1, 1)
-        ax.set_zlim(0, 2)
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Z")
+    ax.cla()
+    ax.set_title(title)
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(-1, 1)
+    ax.set_zlim(-2, 2)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
 
-        # Plot only the current pose
-        ax.scatter([x], [y], [z], c=color, marker=marker)
+    # Plot only the current pose
+    ax.scatter([x], [y], [z], c=color, marker=marker)
 
-        # Draw lines from each detected ArUco marker center to the current pose
-        if markers is not None:
-            for marker in markers:
-                cx, cy, cz = known_markers[str(marker)]
-                dx, dy, dz = x - cx, y - cy, z - cz
-                ax.quiver(cx, cy, cz, dx, dy, dz, color = 'r', arrow_length_ratio = 0.05)
+    # Draw lines from each detected ArUco marker center to the current pose
+    if markers is not None:
+        for marker in markers:
+            cx, cy, cz = known_markers[str(marker)]
+            dx, dy, dz = x - cx, y - cy, z - cz
+            ax.quiver(cx, cy, cz, dx, dy, dz, color = 'r', arrow_length_ratio = 0.05)
 
-        # Overlay statistics
-        try:
-            if len(poses_log) > 1:
-                df = pd.DataFrame(poses_log, columns=["X", "Y", "Z"])
-                mean = df.mean()
-                std = df.std()
-                stats_text = (
-                    f"Mean: ({mean['X']:.2f}, {mean['Y']:.2f}, {mean['Z']:.2f})\n"
-                    f"Std:  ({std['X']:.2f}, {std['Y']:.2f}, {std['Z']:.2f})"
-                )
-                ax.text2D(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=8,
-                        verticalalignment ='top', bbox=dict(boxstyle = "round", fc = "w"),
-                        path_effects=[pe.withStroke(linewidth=1, foreground = "black")])
-                
-                # Save statistics to CSV
-                try:
-                    if len(poses_log) > 1:
-                        df.tail(1).to_csv("pose_statistics_log.csv", mode = 'a', header = not os.path.exists("pose_statistics_log.csv"), index = False)
-                
-                except Exception as e:
-                    print("[Plot Error] Failed to save stats to CSV:", e)
-                
-        except Exception as e:
-            print("[Plot Error] Failed to compute stats overlay:", e)
+    # Overlay statistics
+    try:
+        if len(poses_log) > 1:
+            df = pd.DataFrame(poses_log, columns=["X", "Y", "Z"])
+            mean = df.mean()
+            std = df.std()
+            stats_text = (
+                f"Mean: ({mean['X']:.2f}, {mean['Y']:.2f}, {mean['Z']:.2f})\n"
+                f"Std:  ({std['X']:.2f}, {std['Y']:.2f}, {std['Z']:.2f})"
+            )
+            ax.text2D(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=8,
+                    verticalalignment ='top', bbox=dict(boxstyle = "round", fc = "w"),
+                    path_effects=[pe.withStroke(linewidth=1, foreground = "black")])
+            
+            # Save statistics to CSV
+            try:
+                if len(poses_log) > 1:
+                    df.tail(1).to_csv("pose_statistics_log.csv", mode = 'a', header = not os.path.exists("pose_statistics_log.csv"), index = False)
+            
+            except Exception as e:
+                print("[Plot Error] Failed to save stats to CSV:", e)
+            
+    except Exception as e:
+        print("[Plot Error] Failed to compute stats overlay:", e)
 
-        plt.pause(0.001)
+    
+    fig.canvas.draw()
+    fig.canvas.flush_events()
 
-def runServer(flaskServer : server):
+def runServer(flaskServer: server):
     
     flaskServer.setup_routes()
     flaskServer.run()
@@ -110,7 +133,6 @@ def runServer(flaskServer : server):
 def generate_aruco_board():
     # Constants
     aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-
     dpi = 300
     a4_width_px = 3508
     a4_height_px = 2480
@@ -182,98 +204,27 @@ def generate_aruco_board():
         x, y, z = positions_m[marker_id]
         print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
 
-def generate_aruco_markers(num_markers=20, dictionary_name="DICT_4X4_50", marker_size=200, output_dir="generated_markers"):
-    """
-    Generate and save individual ArUco marker images.
+def wifi_listener_enqueue(pose_queue, port, stop_event):
     
-    Parameters:
-    - num_markers: Number of markers to generate.
-    - dictionary_name: ArUco dictionary to use.
-    - marker_size: Size of each marker image in pixels.
-    - output_dir: Directory to save the marker images.
-    """
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(('', port))
+    print(f"[UDP] Listening on port {port}")
 
-    aruco_dict_map = {
-        "DICT_4X4_50": cv2.aruco.DICT_4X4_50,
-        "DICT_4X4_100": cv2.aruco.DICT_4X4_100,
-        "DICT_4X4_250": cv2.aruco.DICT_4X4_250,
-        "DICT_4X4_1000": cv2.aruco.DICT_4X4_1000,
-        "DICT_5X5_50": cv2.aruco.DICT_5X5_50,
-        "DICT_5X5_100": cv2.aruco.DICT_5X5_100,
-        "DICT_5X5_250": cv2.aruco.DICT_5X5_250,
-        "DICT_5X5_1000": cv2.aruco.DICT_5X5_1000,
-        "DICT_6X6_50": cv2.aruco.DICT_6X6_50,
-        "DICT_6X6_100": cv2.aruco.DICT_6X6_100,
-        "DICT_6X6_250": cv2.aruco.DICT_6X6_250,
-        "DICT_6X6_1000": cv2.aruco.DICT_6X6_1000,
-        "DICT_7X7_50": cv2.aruco.DICT_7X7_50,
-        "DICT_7X7_100": cv2.aruco.DICT_7X7_100,
-        "DICT_7X7_250": cv2.aruco.DICT_7X7_250,
-        "DICT_7X7_1000": cv2.aruco.DICT_7X7_1000,
-        "DICT_ARUCO_ORIGINAL": cv2.aruco.DICT_ARUCO_ORIGINAL,
-        "DICT_APRILTAG_16h5": cv2.aruco.DICT_APRILTAG_16h5,
-        "DICT_APRILTAG_25h9": cv2.aruco.DICT_APRILTAG_25h9,
-        "DICT_APRILTAG_36h10": cv2.aruco.DICT_APRILTAG_36h10,
-        "DICT_APRILTAG_36h11": cv2.aruco.DICT_APRILTAG_36h11
-    }
+    while not stop_event.is_set():
+        try:
+            data, addr = sock.recvfrom(512)
+            # Unpack header + pose + timestamp + aruco_list
+            if data[0:3] == b'\xFA\xF3\x20':
+                x, y, z , timestamp = struct.unpack('<3fQ', data[3:23])
 
-    if dictionary_name not in aruco_dict_map:
-        print(f"[ERROR] Unknown dictionary name: {dictionary_name}")
-        return
+                # Get ArUco list
+                aruco_list = list(data[23:])  # remaining bytes are ArUco IDs
 
-    aruco_dict = cv2.aruco.getPredefinedDictionary(aruco_dict_map[dictionary_name])
+                # Push to queue
+                pose_queue.put((x, y, z, timestamp, aruco_list))
 
-    for marker_id in range(num_markers):
-        marker_img = cv2.aruco.drawMarker(aruco_dict, marker_id, marker_size)
-        filename = os.path.join(output_dir, f"marker_{marker_id}.png")
-        cv2.imwrite(filename, marker_img)
-    print(f"[INFO] Generated {num_markers} ArUco markers in '{output_dir}'")
-
-def wifi_listener_enqueue(pose_queue, ports):
-    sockets = []
-    for port in ports:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind(('', port))
-        sock.listen(1)
-        sock.setblocking(False)
-        sockets.append(sock)
-        print(f"[WIFI] Listening on port {port}")
-
-    inputs = sockets.copy()
-
-    while True:
-        readable, _, _ = select.select(inputs, [], [])
-        for s in readable:
-            if s in sockets:
-                conn, addr = s.accept()
-                conn.setblocking(False)
-                inputs.append(conn)
-                print(f"[WIFI] Connected: {addr}")
-                
-            else:
-                try:
-                    data = s.recv(1024).decode()
-                    if not data:
-                        inputs.remove(s)
-                        s.close()
-                        continue
-                    pose_data = json.loads(data)
-
-                    x = pose_data.get("x")
-                    y = pose_data.get("y")
-                    z = pose_data.get("z")
-                    timestamp = pose_data.get("timestamp")
-                    aruco_list = pose_data.get("aruco_list", [])
-
-                    if None not in (x, y, z, timestamp):
-                        pose_queue.put((x, y, z, timestamp, aruco_list))
-                        
-                except Exception as e:
-                    print(f"[WIFI] Error: {e}")
-                    inputs.remove(s)
-                    s.close()
+        except Exception as e:
+            print(f"[UDP Listener] Error: {e}")
 
 def resource_path(relative_path):
     import sys, os
@@ -281,37 +232,31 @@ def resource_path(relative_path):
         return os.path.join(sys._MEIPASS, relative_path)
     return os.path.abspath(relative_path)
 
-def test_communication():
-    inputs = sockets.copy()
+def kalman_filter_config():
+    # === Kalman Filter Configuration ===
+    kalman = cv2.KalmanFilter(6, 3)  # 6 state variables (pos + velocity), 3 measurements (pos only)
+    # Transition matrix (state update: x = Ax + Bu + w)
+    kalman.transitionMatrix = np.array([
+        [1, 0, 0, 1, 0, 0],  # x
+        [0, 1, 0, 0, 1, 0],  # y
+        [0, 0, 1, 0, 0, 1],  # z
+        [0, 0, 0, 1, 0, 0],  # vx
+        [0, 0, 0, 0, 1, 0],  # vy
+        [0, 0, 0, 0, 0, 1]   # vz
+    ], dtype=np.float32)
 
-    while True:
-        readable, _, _ = select.select(inputs, [], [])
-        for s in readable:
-            if s in sockets:
-                conn, addr = s.accept()
-                conn.setblocking(False)
-                inputs.append(conn)
-                print(f"[WIFI] Connected: {addr}")
-            else:
-                try:
-                    data = s.recv(1024).decode()
-                    if not data:
-                        inputs.remove(s)
-                        s.close()
-                        continue
-                    pose_data = json.loads(data)
-                    x = pose_data.get("x")
-                    y = pose_data.get("y")
-                    z = pose_data.get("z")
-                    if None not in (x, y, z):
-                        pose_queue.put((x, y, z))
-                except Exception as e:
-                    print(f"[WIFI] Error: {e}")
-                    inputs.remove(s)
-                    s.close()
+    #Measurement matrix (we only measure position)
+    kalman.measurementMatrix = np.eye(3, 6, dtype=np.float32)
+    kalman.processNoiseCov = np.eye(6, dtype=np.float32) * 1e-4
+    kalman.measurementNoiseCov = np.eye(3, dtype=np.float32) * 1e-2
+    kalman.errorCovPost = np.eye(6, dtype=np.float32)
+    
+    # Initial state (0 position, 0 velocity)
+    kalman.statePost = np.zeros((6, 1), dtype=np.float32)
+    return kalman
 
-def wifi_processor_dequeue(pose_queue, aggregator, flaskServer):
-    while True:
+def wifi_processor_dequeue(pose_queue, aggregator, flaskServer, stop_event):
+    while not stop_event.is_set():
         if not pose_queue.empty():
             x, y, z, timestamp, aruco_list = pose_queue.get()
             aggregator.update_pose((x, y, z))
@@ -320,39 +265,40 @@ def wifi_processor_dequeue(pose_queue, aggregator, flaskServer):
             if pose and  0 <= (time_now - timestamp) <= POSE_UPDATE_THRESHOLD:
                 x, y, z = pose
                 flaskServer.updatePosition(x, y, z)
-                update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_list, color = 'orange', marker = 'x')
+                with aruco_ids_lock:
+                    combined_aruco_ids.update(aruco_list)
 
 def receive_from_clients(method, aggregator, flaskServer, stop_event):
     if method == 'wifi':
         pose_queue = queue.Queue(maxsize = 5000)
-        ports = [6001, 6002]
-        threading.Thread(target=wifi_listener_enqueue, args=(pose_queue, ports), daemon=True).start()
-        threading.Thread(target=wifi_processor_dequeue, args=(pose_queue, aggregator, flaskServer), daemon=True).start()
+        port = 6002
+        threading.Thread(target = wifi_listener_enqueue, args=(pose_queue, port, stop_event), daemon=True).start()
+        threading.Thread(target = wifi_processor_dequeue, args=(pose_queue, aggregator, flaskServer, stop_event), daemon=True).start()
     elif method == 'i2c':
-        # Map addresses to bus numbers
-        bus_map = {0x08: smbus2.SMBus(1), 0x09: smbus2.SMBus(3)}
+        # Use a single I2C bus for all slave addresses
+        i2c_bus = {0x08: smbus2.SMBus(1), 0x09: smbus2.SMBus(3)} 
+        bus_map = {addr: i2c_bus for addr in SLAVE_CONFIG.keys()}
         addrs = list(SLAVE_CONFIG.keys())
         buses = [bus_map[addr] for addr in addrs]
         threading.Thread(target=i2c_listener, args=(buses, addrs, aggregator, flaskServer, stop_event), daemon=True).start()
 
 def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
+    global ready_flags
     last_counters = {addr: 0 for addr in addresses}
     lost_packages = {addr: 0 for addr in addresses}
     packages = {addr: 0 for addr in addresses}
     pose_temp = {}
-    wait_for_all_slaves = set()    
+    all_connected_slaves = set()    
     time_diff = 0.0
     while not stop_event.is_set():
         try:
             # Wait for any ready event
             for addr in addresses:
                 bus = buses[addresses.index(addr)]
-                if addr not in wait_for_all_slaves and GPIO.input(SLAVE_CONFIG[addr]) == GPIO.HIGH:
+                if addr not in all_connected_slaves and GPIO.input(SLAVE_CONFIG[addr]) == GPIO.HIGH:
                     bus.write_byte(addr, 0xA5)
-                    wait_for_all_slaves.add(addr)
-                    
-                if GPIO.input(SLAVE_CONFIG[addr]) == GPIO.HIGH:
-                    ready_flags[addr].set()
+                    all_connected_slaves.add(addr)
+                    ready_flags[addr].clear()
                     
                 if ready_flags[addr].is_set():
                     ready_flags[addr].clear()
@@ -407,14 +353,17 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
             print(f"[I2C Listener] Fatal error: {e}")
                    
 def main():
-    
+    global known_markers
+    # --- Generate Aruco board for camera calibration ---
     if GENERATE_ARUCO_BOARD:
         try:
+            import random
             generate_aruco_board()
         
         except RuntimeError as e:
             print(f"[ARUCO BOARD ERROR] {e}")
-        
+    
+    # --- Camera Calibration ---   
     recalibrate = False
     camera = Camera()
 
@@ -423,55 +372,37 @@ def main():
         if mean_error < 0.5:
             print("Calibration is GOOD ✅")
             recalibrate = True
+        else:
+            print("Retrying calibration. Got error:", mean_error)
         
     detector = Detection(known_markers_path="core/utils/known_markers.json")
-    
+    known_markers = detector.known_markers
     flaskServer = server(port = 5000)
-    stop_event = threading.Event()
     aggregator = PoseAggregator()
-    
+    stop_event = threading.Event()
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
-    
+    threading.Thread(target=plot_updater_thread, args = (aggregator, stop_event), daemon=True).start()
     server_thread.start()
     
-    for addr, pin in SLAVE_CONFIG.items():
-        GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-        ready_flags[addr] = threading.Event()
-        GPIO.add_event_detect(pin, GPIO.RISING, callback=make_callback(addr))
+    if COMMUNICATION_METHOD == "i2c":
+        for addr, pin in SLAVE_CONFIG.items():
+            GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+            ready_flags[addr] = threading.Event()
+            GPIO.add_event_detect(pin, GPIO.RISING, callback=make_callback(addr))
     
-    # Choose communication method: 'wifi' or 'i2c'
-    communication_method = 'i2c'  # ← change to 'i2c' when needed
-    receive_from_clients(communication_method, aggregator, flaskServer, stop_event)
+    receive_from_clients(COMMUNICATION_METHOD, aggregator, flaskServer, stop_event)
     
+    # --- Open Camera for Video Capturing ---
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
         sys.exit(1)
-    # Main thread displays
     
     # === Kalman Filter Configuration ===
-    kalman = cv2.KalmanFilter(6, 3)  # 6 state variables (pos + velocity), 3 measurements (pos only)
-    # Transition matrix (state update: x = Ax + Bu + w)
-    kalman.transitionMatrix = np.array([
-        [1, 0, 0, 1, 0, 0],  # x
-        [0, 1, 0, 0, 1, 0],  # y
-        [0, 0, 1, 0, 0, 1],  # z
-        [0, 0, 0, 1, 0, 0],  # vx
-        [0, 0, 0, 0, 1, 0],  # vy
-        [0, 0, 0, 0, 0, 1]   # vz
-    ], dtype=np.float32)
-
-    #Measurement matrix (we only measure position)
-    kalman.measurementMatrix = np.eye(3, 6, dtype=np.float32)
-
-    kalman.processNoiseCov = np.eye(6, dtype=np.float32) * 1e-4
-    kalman.measurementNoiseCov = np.eye(3, dtype=np.float32) * 1e-2
-    kalman.errorCovPost = np.eye(6, dtype=np.float32)
-
-    # Initial state (0 position, 0 velocity)
-    kalman.statePost = np.zeros((6, 1), dtype=np.float32)
+    kalman = kalman_filter_config()
     filtered_pos = 0
-
+    
+    # Main thread displays
     while True:
 
             ret, frame = video.read()
@@ -529,7 +460,11 @@ def main():
                         kalman.correct(measured)
                         predicted = kalman.predict()
                         filtered_pos = predicted[:3]
-
+                
+                aruco_markers_detected = np.array(aruco_markers_detected).flatten().tolist() if aruco_markers_detected is not None else []
+                with aruco_ids_lock:
+                    combined_aruco_ids.update(aruco_markers_detected)
+                    
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
                 aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]))
                 pose = aggregator.get_average_pose()
@@ -537,9 +472,8 @@ def main():
                     x, y, z = pose
                     # Update server with smoothed average
                     flaskServer.updatePosition(x, y, z)
-                    update_pose_visual_and_stats("3D Pose Estimation",pose, aruco_markers_detected)
                     #print Average Camera Position
-                    print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
+                    print(f"Filtered Camera Position -> X: {x:.4f}, Y: {y:.4f}, Z: {z:.4f}")
     
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")

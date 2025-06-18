@@ -1,6 +1,4 @@
 import pigpio
-import time
-import struct
 
 # Respond with the same 16-byte payload
 class SimpleI2CSlave:
