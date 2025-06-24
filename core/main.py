@@ -8,10 +8,8 @@ from detection import Detection
 import sys
 from communication.pose_aggregator import PoseAggregator
 from server.flaskServer import server
-import matplotlib.pyplot as plt
-import pandas as pd
-import os
-import matplotlib.patheffects as pe
+import random
+
 
 # --- General GLOBAL Variables --- 
 POSE_UPDATE_THRESHOLD = 20000.0
@@ -39,15 +37,12 @@ elif COMMUNICATION_METHOD == "wifi":
 
 # --- GLOBAL Variables and Intialization of 3D Visulaization ---
 plot_lock = threading.Lock()
-fig = plt.figure()
-ax = fig.add_subplot(111, projection = '3d')
-poses_log = []
-plt.ion()
+
 combined_aruco_ids = set()
 aruco_ids = []
 aruco_ids_lock = threading.Lock()
 known_markers = {}
-MAX_LOG_LEN = 500
+
 
 
 def make_callback(addr):
@@ -56,74 +51,19 @@ def make_callback(addr):
         ready_flags[addr].set()
     return callback
 
-def plot_updater_thread(aggregator, stop_event):
+def plot_updater_thread(aggregator, stop_event, flaskServer = None):
     global aruco_ids,combined_aruco_ids
     while not stop_event.is_set():
-        pose = aggregator.get_average_pose()
         # Update global set
         with aruco_ids_lock:
             aruco_ids = list(combined_aruco_ids)
 
         # Call your visual update with all seen markers
-        update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_ids)
+        #update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_ids)
+        flaskServer.updateIds(aruco_ids)
         time.sleep(0.02)
             
-def update_pose_visual_and_stats(title, pose, markers = None, color = 'b', marker = 'o'):
-    global known_markers, fig, ax, poses_log
-    x, y, z = pose
 
-    # Keep history for statistics, but don't plot it all
-    if len(poses_log) > MAX_LOG_LEN:
-        poses_log.pop(0)
-    poses_log.append((x, y, z))
-
-    ax.cla()
-    ax.set_title(title)
-    ax.set_xlim(-1, 1)
-    ax.set_ylim(-1, 1)
-    ax.set_zlim(-2, 2)
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-
-    # Plot only the current pose
-    ax.scatter([x], [y], [z], c=color, marker=marker)
-
-    # Draw lines from each detected ArUco marker center to the current pose
-    if markers is not None:
-        for marker in markers:
-            cx, cy, cz = known_markers[str(marker)]
-            dx, dy, dz = x - cx, y - cy, z - cz
-            ax.quiver(cx, cy, cz, dx, dy, dz, color = 'r', arrow_length_ratio = 0.05)
-
-    # Overlay statistics
-    try:
-        if len(poses_log) > 1:
-            df = pd.DataFrame(poses_log, columns=["X", "Y", "Z"])
-            mean = df.mean()
-            std = df.std()
-            stats_text = (
-                f"Mean: ({mean['X']:.2f}, {mean['Y']:.2f}, {mean['Z']:.2f})\n"
-                f"Std:  ({std['X']:.2f}, {std['Y']:.2f}, {std['Z']:.2f})"
-            )
-            ax.text2D(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=8,
-                    verticalalignment ='top', bbox=dict(boxstyle = "round", fc = "w"),
-                    path_effects=[pe.withStroke(linewidth=1, foreground = "black")])
-            
-            # Save statistics to CSV
-            try:
-                if len(poses_log) > 1:
-                    df.tail(1).to_csv("pose_statistics_log.csv", mode = 'a', header = not os.path.exists("pose_statistics_log.csv"), index = False)
-            
-            except Exception as e:
-                print("[Plot Error] Failed to save stats to CSV:", e)
-            
-    except Exception as e:
-        print("[Plot Error] Failed to compute stats overlay:", e)
-
-    
-    fig.canvas.draw()
-    fig.canvas.flush_events()
 
 def runServer(flaskServer: server):
     

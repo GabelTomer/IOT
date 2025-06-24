@@ -11,6 +11,7 @@ class server:
         self.known_markers_path = known_markers_path
         self.lock = threading.Lock()
         self.port = port
+        self.arucoList = None
         self.position = {
             'x': 0.0,
             'y': 0.0,
@@ -153,6 +154,11 @@ class server:
             dataToSend["timestamp"] = time.time()
             return jsonify(dataToSend)
         
+        @self.app.route('/get_aruco_list')
+        def show_visualization():
+            dataToSend = self.getArucoList()
+            return jsonify(dataToSend)
+        
         @self.app.route('/add_marker', methods=['POST'])
         def add_marker():
             data = request.get_json()
@@ -184,7 +190,14 @@ class server:
     def getPos(self):
         with self.lock:
             return self.position
-
+        
+    def getArucoList(self):
+        with self.lock:
+            return self.arucoList
+        
+    def updateIds(self, arucoList):
+        with self.lock:
+            self.arucoList = arucoList
 #for debug only use with out raspberry pi
 '''
 def main():
