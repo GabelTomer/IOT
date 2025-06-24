@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:logger/logger.dart';
 import 'robot.dart';
+import 'dart:math';
 
 class RoomCustomizerPage extends StatefulWidget {
   final String ipAddress;
@@ -26,6 +27,72 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
   bool settingOrigin = false;
   int? draggingIndex;
   final double dragThreshold = 20; // distance in pixels to "grab" a point
+  double? roomWidthMeters;
+  double? roomHeightMeters;
+  double meterToPixelX = 1.0;
+  double meterToPixelY = 1.0;
+  Size? canvasSize;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showInitialRoomDimensionDialog();
+    });
+  }
+
+  void _showInitialRoomDimensionDialog() {
+    final widthController = TextEditingController();
+    final heightController = TextEditingController();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (context) => AlertDialog(
+            title: Text('Set Room Dimensions (meters)'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: widthController,
+                  keyboardType: TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(labelText: 'Room Width'),
+                ),
+                TextField(
+                  controller: heightController,
+                  keyboardType: TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(labelText: 'Room Height'),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  final width = double.tryParse(widthController.text);
+                  final height = double.tryParse(heightController.text);
+
+                  if (width != null &&
+                      height != null &&
+                      width > 0 &&
+                      height > 0) {
+                    setState(() {
+                      roomWidthMeters = width;
+                      roomHeightMeters = height;
+                    });
+                    Navigator.pop(context);
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Enter valid dimensions')),
+                    );
+                  }
+                },
+                child: Text('Continue'),
+              ),
+            ],
+          ),
+    );
+  }
 
   void handleTap(TapUpDetails details) {
     final localPos = details.localPosition;
@@ -100,55 +167,135 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
       );
       return;
     }
-    final TextEditingController widthController = TextEditingController();
-    final TextEditingController heightController = TextEditingController();
+    saveRoomData(roomHeightMeters!, roomWidthMeters!);
+  }
+
+  void _applyPrecisionScaling(
+    List<double> pixelLengths,
+    List<double> realWorldLengths,
+  ) {
+    if (canvasSize == null ||
+        roomWidthMeters == null ||
+        roomHeightMeters == null)
+      return;
+    double maxWidth = 0;
+    double maxHeight = 0;
+    for (int i = 0; i < points.length; i++) {
+      for (int j = i; j < points.length; j++) {
+        double width = (points[j].dx - points[i].dx).abs();
+        double height = (points[j].dy - points[i].dy).abs();
+        if (i == j) continue;
+        if (width > maxWidth) {
+          maxWidth = width;
+        }
+        if (height > maxHeight) {
+          maxHeight = height;
+        }
+      }
+    }
+    // Use average pixel-per-meter across both dimensions
+    final double pxPerMeterwidth = maxWidth / roomWidthMeters!;
+    final double pxPerMeterHeight = maxHeight / roomHeightMeters!;
+
+    setState(() {
+      final List<Offset> newPoints = [];
+      Offset current = points[0];
+      newPoints.add(current);
+
+      for (int i = 0; i < realWorldLengths.length; i++) {
+        final Offset p1 = points[i];
+        final Offset p2 = points[(i + 1) % points.length];
+
+        final double theta = (p2 - p1).direction;
+
+        final double lengthInPixelsWidth =
+            realWorldLengths[i] * pxPerMeterwidth * cos(theta);
+        final double lengthInPixelsHeight =
+            realWorldLengths[i] * pxPerMeterHeight * sin(theta);
+        current = Offset(
+          current.dx + lengthInPixelsWidth,
+          current.dy + lengthInPixelsHeight,
+        );
+        newPoints.add(current);
+      }
+
+      for (int i = 0; i < points.length; i++) {
+        points[i] = newPoints[i];
+      }
+
+      if (origin != null) {
+        final Offset shift = newPoints[0] - points[0];
+        origin = origin! + shift;
+      }
+
+      widget.logger.i(
+        "Precision rescale complete. width: px/m: $pxPerMeterwidth, height: px/m: $pxPerMeterHeight",
+      );
+    });
+  }
+
+  void _showPrecisionSetupDialog() {
+    final List<double> pixelLengths = [];
+    final List<TextEditingController> controllers = [];
+
+    for (int i = 0; i < points.length; i++) {
+      final p1 = points[i];
+      final p2 = points[(i + 1) % points.length];
+      final pixelLength = (p2 - p1).distance;
+      pixelLengths.add(pixelLength);
+      controllers.add(TextEditingController());
+    }
 
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: Text('Enter Room Dimensions'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: widthController,
-                  keyboardType: TextInputType.numberWithOptions(decimal: true),
-                  decoration: InputDecoration(labelText: 'Room Width (meters)'),
-                ),
-                TextField(
-                  controller: heightController,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Improve Precision'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: controllers.length,
+              itemBuilder: (context, index) {
+                return TextField(
+                  controller: controllers[index],
                   keyboardType: TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
-                    labelText: 'Room Height (meters)',
+                    labelText: 'Line ${index + 1} length (m)',
                   ),
-                ),
-              ],
+                );
+              },
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(), // Cancel
-                child: Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () {
-                  final double? width = double.tryParse(widthController.text);
-                  final double? height = double.tryParse(heightController.text);
-
-                  if (width != null && height != null) {
-                    Navigator.of(context).pop(); // Close dialog
-
-                    saveRoomData(width, height);
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Please enter valid numbers')),
-                    );
-                  }
-                },
-                child: Text('Save'),
-              ),
-            ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                final List<double> realWorldLengths = [];
+                for (final controller in controllers) {
+                  final value = double.tryParse(controller.text);
+                  if (value == null || value <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Enter valid lengths for all lines'),
+                      ),
+                    );
+                    return;
+                  }
+                  realWorldLengths.add(value);
+                }
+
+                _applyPrecisionScaling(pixelLengths, realWorldLengths);
+                Navigator.pop(context);
+              },
+              child: Text('Apply'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -159,33 +306,65 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
         title: Text('Customize ${widget.roomName}'),
         actions: [
           IconButton(
-            icon: Icon(Icons.my_location),
-            tooltip: 'Set Origin',
+            icon: Icon(Icons.delete),
+            tooltip: 'Clear Drawing',
             onPressed: () {
               setState(() {
-                settingOrigin = true;
+                points.clear();
+                origin = null;
+                draggingIndex = null;
               });
             },
           ),
+          IconButton(
+            icon: Icon(Icons.my_location),
+            tooltip: 'Set Origin',
+            onPressed: () => setState(() => settingOrigin = true),
+          ),
+          IconButton(
+            icon: Icon(Icons.settings), // For precision setup (Step 3)
+            tooltip: 'Improve Precision',
+            onPressed: () {
+              if (points.length > 1) {
+                _showPrecisionSetupDialog(); // Implement in Step 3
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Draw at least two points')),
+                );
+              }
+            },
+          ),
+          
           IconButton(
             icon: Icon(Icons.save),
             onPressed: () => _showRoomDimensionsDialog(context),
           ),
         ],
       ),
-      body: GestureDetector(
-        onTapUp: handleTap,
-        onPanStart: handlePanStart,
-        onPanUpdate: handlePanUpdate,
-        onPanEnd: (_) => setState(() => draggingIndex = null),
-        child: CustomPaint(
-          painter: RoomPainter(points: points, origin: origin),
-          child: Container(
-            width: double.infinity,
-            height: double.infinity,
-            color: Colors.transparent, // Must be visible to detect gestures
-          ),
-        ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          canvasSize = Size(constraints.maxWidth, constraints.maxHeight);
+
+          if (roomWidthMeters != null && roomHeightMeters != null) {
+            meterToPixelX = canvasSize!.width / roomWidthMeters!;
+            meterToPixelY = canvasSize!.height / roomHeightMeters!;
+          }
+
+          return GestureDetector(
+            onTapUp: handleTap,
+            onPanStart: handlePanStart,
+            onPanUpdate: handlePanUpdate,
+            onPanEnd: (_) => setState(() => draggingIndex = null),
+            child: CustomPaint(
+              painter: RoomPainter(points: points, origin: origin),
+              child: Container(
+                width: double.infinity,
+                height: double.infinity,
+                color: Colors.transparent,
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -196,6 +375,34 @@ class RoomPainter extends CustomPainter {
   final Offset? origin;
 
   RoomPainter({required this.points, this.origin});
+
+  List<double> computeInteriorAngles(List<Offset> pts) {
+    final angles = <double>[];
+    final count = pts.length;
+
+    for (int i = 0; i < count; i++) {
+      final prev = pts[(i - 1 + count) % count];
+      final curr = pts[i];
+      final next = pts[(i + 1) % count];
+
+      final v1 = (prev - curr);
+      final v2 = (next - curr);
+
+      final angleRad = (v1.direction - v2.direction).abs();
+      final angleDeg =
+          (angleRad > 3.14159 ? (2 * 3.14159 - angleRad) : angleRad) *
+          180 /
+          3.14159;
+
+      angles.add(angleDeg);
+    }
+
+    return angles;
+  }
+
+  bool isClosedShape(List<Offset> pts) {
+    return pts.length > 2;
+  }
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -231,6 +438,37 @@ class RoomPainter extends CustomPainter {
       )..layout();
       textPainter.paint(canvas, origin! + Offset(8, -12));
     }
+    if (isClosedShape(points)) {
+      final angles = computeInteriorAngles(points);
+
+      for (int i = 0; i < points.length; i++) {
+        final textPainter = TextPainter(
+          text: TextSpan(
+            text: '${angles[i].toStringAsFixed(1)}°',
+            style: TextStyle(color: Colors.black, fontSize: 12),
+          ),
+          textDirection: TextDirection.ltr,
+        );
+        textPainter.layout();
+        textPainter.paint(canvas, points[i] + Offset(10, -20));
+        final namePainter = TextPainter(
+          text: TextSpan(
+            text: 'line ${i + 1}',
+            style: TextStyle(color: Colors.black, fontSize: 12),
+          ),
+          textDirection: TextDirection.ltr,
+        );
+        namePainter.layout();
+        // Position the name in the middle of the line segment
+        final lineStart = points[i];
+        final lineEnd = points[(i + 1) % points.length];
+        final midPoint = Offset(
+          (lineStart.dx + lineEnd.dx) / 2,
+          (lineStart.dy + lineEnd.dy) / 2,
+        );
+        namePainter.paint(canvas, midPoint + Offset(10, -20));
+      }
+    }
   }
 
   @override
@@ -240,7 +478,11 @@ class RoomPainter extends CustomPainter {
 class RoomSelectorPage extends StatefulWidget {
   final String ipAddress;
   final Logger logger;
-  const RoomSelectorPage({super.key, required this.ipAddress, required this.logger});
+  const RoomSelectorPage({
+    super.key,
+    required this.ipAddress,
+    required this.logger,
+  });
   @override
   State<RoomSelectorPage> createState() => _RoomSelectorPageState();
 }
