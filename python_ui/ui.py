@@ -6,7 +6,10 @@ from PySide6.QtWidgets import (
     QTableWidgetItem
 )
 from PySide6.QtCore import Qt, QTimer
-
+import matplotlib.pyplot as plt
+import pandas as pd
+import os
+import matplotlib.patheffects as pe
 
 def is_valid_ip(ip: str) -> bool:
     import re
@@ -58,6 +61,67 @@ def notifyRoomSelection(server_ip, room):
     except Exception as e:
         QMessageBox.critical(None, "Notification Error", f"Could not notify room selection:\n{e}")
 
+MAX_LOG_LEN = 500
+fig = plt.figure()
+ax = fig.add_subplot(111, projection = '3d')
+poses_log = []
+known_markers = {}
+def update_pose_visual_and_stats(title, pose, markers = None, color = 'b', marker = 'o'):
+    global known_markers, fig, ax, poses_log
+    x, y, z = pose
+
+    # Keep history for statistics, but don't plot it all
+    if len(poses_log) > MAX_LOG_LEN:
+        poses_log.pop(0)
+    poses_log.append((x, y, z))
+
+    ax.cla()
+    ax.set_title(title)
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(-1, 1)
+    ax.set_zlim(-2, 2)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+
+    # Plot only the current pose
+    ax.scatter([x], [y], [z], c=color, marker=marker)
+
+    # Draw lines from each detected ArUco marker center to the current pose
+    if markers is not None:
+        for marker in markers:
+            cx, cy, cz = known_markers[str(marker)]
+            dx, dy, dz = x - cx, y - cy, z - cz
+            ax.quiver(cx, cy, cz, dx, dy, dz, color = 'r', arrow_length_ratio = 0.05)
+
+    # Overlay statistics
+    try:
+        if len(poses_log) > 1:
+            df = pd.DataFrame(poses_log, columns=["X", "Y", "Z"])
+            mean = df.mean()
+            std = df.std()
+            stats_text = (
+                f"Mean: ({mean['X']:.2f}, {mean['Y']:.2f}, {mean['Z']:.2f})\n"
+                f"Std:  ({std['X']:.2f}, {std['Y']:.2f}, {std['Z']:.2f})"
+            )
+            ax.text2D(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=8,
+                    verticalalignment ='top', bbox=dict(boxstyle = "round", fc = "w"),
+                    path_effects=[pe.withStroke(linewidth=1, foreground = "black")])
+            
+            # Save statistics to CSV
+            try:
+                if len(poses_log) > 1:
+                    df.tail(1).to_csv("pose_statistics_log.csv", mode = 'a', header = not os.path.exists("pose_statistics_log.csv"), index = False)
+            
+            except Exception as e:
+                print("[Plot Error] Failed to save stats to CSV:", e)
+            
+    except Exception as e:
+        print("[Plot Error] Failed to compute stats overlay:", e)
+
+    
+    fig.canvas.draw()
+    fig.canvas.flush_events()
 
 class MarkerManager(QWidget):
     def __init__(self, server_ip, room):
@@ -255,6 +319,10 @@ class FlaskClientUI(QWidget):
             x, y, z = data.get("x"), data.get("y"), data.get("z")
             self.position_label.setText(f"Coordinates: X={x}, Y={y}, Z={z}")
             self.set_status_connected(True)
+            response = requests.get(f"{self.server_url}/get_aruco_list", timeout=2)
+            response.raise_for_status()
+            arucoList = response.json()
+            update_pose_visual_and_stats("3D Visualization",data, arucoList)
         except Exception:
             self.position_label.setText("Coordinates: N/A")
             self.set_status_connected(False)

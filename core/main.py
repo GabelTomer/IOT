@@ -11,18 +11,63 @@ from communication.pose_aggregator import PoseAggregator
 from communication.pose_aggregator import PoseAggregator
 from server.flaskServer import server
 import random
-import socket
-import json
 
-import smbus2
 
-import math
-import select
+# --- General GLOBAL Variables --- 
+POSE_UPDATE_THRESHOLD = 20000.0
+GENERATE_ARUCO_BOARD = False
+COMMUNICATION_METHOD = 'wifi'  # change to 'WiFi or i2c' when needed
 
-POSE_UPDATE_THRESHOLD = 10000.0
-GENERATE_ARUCO_BOARD = True
+# --- GLOBAL Variables and Import specific Libraries for I2C ---
+if COMMUNICATION_METHOD == 'i2c':
+    import RPi.GPIO as GPIO
+    import smbus2
+    
+    SLAVE_CONFIG = {
+    0x08: 18,  # GPIO pin for Pi2 interrupt
+    0x09: 19,  # GPIO pin for Pi3 interrupt
+    }
+    # GPIO setup and interrupt handling for data ready (per slave)
+    GPIO.setmode(GPIO.BCM)
+    ready_flags = {}
 
-def runServer(flaskServer : server):
+# --- GLOBAL Variables and Import specific Libraries for WiFi ---
+elif COMMUNICATION_METHOD == "wifi":
+    import socket
+    import queue
+
+
+# --- GLOBAL Variables and Intialization of 3D Visulaization ---
+plot_lock = threading.Lock()
+
+combined_aruco_ids = set()
+aruco_ids = []
+aruco_ids_lock = threading.Lock()
+known_markers = {}
+
+
+
+def make_callback(addr):
+    global ready_flags
+    def callback(channel):
+        ready_flags[addr].set()
+    return callback
+
+def plot_updater_thread(aggregator, stop_event, flaskServer = None):
+    global aruco_ids,combined_aruco_ids
+    while not stop_event.is_set():
+        # Update global set
+        with aruco_ids_lock:
+            aruco_ids = list(combined_aruco_ids)
+
+        # Call your visual update with all seen markers
+        #update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_ids)
+        flaskServer.updateIds(aruco_ids)
+        time.sleep(0.02)
+            
+
+
+def runServer(flaskServer: server):
     
     flaskServer.setup_routes()
     flaskServer.run()
