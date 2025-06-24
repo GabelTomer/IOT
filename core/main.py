@@ -377,7 +377,7 @@ def main():
         
     detector = Detection(known_markers_path="core/utils/known_markers.json")
     known_markers = detector.known_markers
-    flaskServer = server(port = 5000)
+    flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector)
     aggregator = PoseAggregator()
     stop_event = threading.Event()
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
@@ -475,8 +475,7 @@ def main():
                     #print Average Camera Position
                     print(f"Filtered Camera Position -> X: {x:.4f}, Y: {y:.4f}, Z: {z:.4f}")
     
-            else:
-                print("[ERROR] twoDArray or threeDArray is None!")
+
                 
             cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -487,6 +486,7 @@ def main():
 
     #Now wait for all threads to end
     server_thread.join()
+    #averaging_thread.join()
 
 if __name__ == "__main__":
     main()

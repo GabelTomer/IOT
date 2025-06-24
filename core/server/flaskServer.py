@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request
 import json
 import threading
+import time
 
 class server:
     def __init__(self,  port = 5000, known_markers_path=None, detector=None):
@@ -96,6 +97,26 @@ class server:
             self.save_markers(self.known_markers, room=room)
             return jsonify({"status": "updated", "id": marker_id}), 200
         
+        @self.app.route('/change_room_shape', methods=['POST'])
+        def change_room_shape():
+            data = request.get_json()
+            room_name = str(data.get("room"))
+            boundry = data.get("boundry")
+            origin = data.get("origin")
+            width = data.get("width")
+            height = data.get("height")
+            if None in [room_name, boundry, origin, width, height]:
+                return jsonify({"error": "Missing fields"}), 400
+
+            markers = self.known_markers[room_name]
+            markers.update({
+                "boundry": boundry,
+                "origin": origin,
+                "width": width,
+                "height": height
+            })
+            self.save_markers(self.known_markers, room=room_name)
+            return jsonify({"status": "updated", "room": room_name}), 200
         
         @self.app.route('/delete_room', methods=['POST'])
         def delete_room():
@@ -128,9 +149,9 @@ class server:
         
         @self.app.route('/get_position')
         def get_position():
-
-            # Example position data
-            return jsonify(self.getPos())
+            dataToSend = self.getPos()
+            dataToSend["timestamp"] = time.time()
+            return jsonify(dataToSend)
         
         @self.app.route('/add_marker', methods=['POST'])
         def add_marker():
