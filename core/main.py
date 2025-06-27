@@ -321,7 +321,7 @@ def main():
 
     
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
-    threading.Thread(target=plot_updater_thread, args = (aggregator, stop_event), daemon=True).start()
+    threading.Thread(target=plot_updater_thread, args = (aggregator, stop_event, flaskServer), daemon=True).start()
     server_thread.start()
     
     # Choose communication method: 'wifi' or 'i2c'
