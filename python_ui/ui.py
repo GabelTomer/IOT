@@ -62,12 +62,11 @@ def notifyRoomSelection(server_ip, room):
         QMessageBox.critical(None, "Notification Error", f"Could not notify room selection:\n{e}")
 
 MAX_LOG_LEN = 500
-fig = plt.figure()
-ax = fig.add_subplot(111, projection = '3d')
+
 poses_log = []
 known_markers = {}
-def update_pose_visual_and_stats(title, pose, markers = None, color = 'b', marker = 'o'):
-    global known_markers, fig, ax, poses_log
+def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = 'b', marker = 'o'):
+    global known_markers, poses_log
     x, y, z = pose
 
     # Keep history for statistics, but don't plot it all
@@ -169,6 +168,9 @@ class MarkerManager(QWidget):
 
             self.marker_table.setRowCount(0)
             for row, (mid, coords) in enumerate(markers.items()):
+                if mid == "origin" or mid == "boundry" or mid == "width" or mid == "height":
+                    # Skip origin and boundary markers
+                    continue
                 self.marker_table.insertRow(row)
                 self.marker_table.setItem(row, 0, QTableWidgetItem(mid))
                 self.marker_table.setItem(row, 1, QTableWidgetItem(str(coords["x"])))
@@ -259,7 +261,8 @@ class FlaskClientUI(QWidget):
         self.server_url = f"http://{server_ip}:5000"
         self.setWindowTitle("Barcode Locolaization Client")
         self.setFixedSize(500, 400)
-
+        self.fig = plt.figure()
+        self.ax = self.fig.add_subplot(111, projection = '3d')
         self.layout = QVBoxLayout()
 
         self.room_selector = QComboBox()
@@ -322,7 +325,7 @@ class FlaskClientUI(QWidget):
             response = requests.get(f"{self.server_url}/get_aruco_list", timeout=2)
             response.raise_for_status()
             arucoList = response.json()
-            update_pose_visual_and_stats("3D Visualization",data, arucoList)
+            update_pose_visual_and_stats(self.fig, self.ax,"3D Visualization",data, arucoList)
         except Exception:
             self.position_label.setText("Coordinates: N/A")
             self.set_status_connected(False)
