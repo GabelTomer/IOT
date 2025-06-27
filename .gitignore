@@ -33,3 +33,4 @@ core/utils/known_markers.json
 build/ui/Analysis-00.toc
 /build
 ui.spec
+pose_statistics_log.csv
