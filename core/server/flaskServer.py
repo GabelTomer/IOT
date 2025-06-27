@@ -11,7 +11,6 @@ class server:
         self.known_markers_path = known_markers_path
         self.lock = threading.Lock()
         self.port = port
-        self.arucoList = None
         self.position = {
             'x': 0.0,
             'y': 0.0,

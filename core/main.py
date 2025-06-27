@@ -74,6 +74,7 @@ def make_callback(addr):
 
 def plot_updater_thread(aggregator, stop_event, flaskServer = None):
     global aruco_ids,combined_aruco_ids
+    print("Started plot update thread")
     while not stop_event.is_set():
         # Update global set
         with aruco_ids_lock:

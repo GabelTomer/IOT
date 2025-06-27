@@ -322,13 +322,17 @@ class FlaskClientUI(QWidget):
             x, y, z = data.get("x"), data.get("y"), data.get("z")
             self.position_label.setText(f"Coordinates: X={x}, Y={y}, Z={z}")
             self.set_status_connected(True)
+            
+        except Exception:
+            self.position_label.setText("Coordinates: N/A")
+            self.set_status_connected(False)
+        try:
             response = requests.get(f"{self.server_url}/get_aruco_list", timeout=2)
             response.raise_for_status()
             arucoList = response.json()
             update_pose_visual_and_stats(self.fig, self.ax,"3D Visualization",data, arucoList)
         except Exception:
-            self.position_label.setText("Coordinates: N/A")
-            self.set_status_connected(False)
+            print("No Aruco List")
 
     def refresh_rooms(self):
         rooms = get_room_list(self.server_ip)
