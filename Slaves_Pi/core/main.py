@@ -31,12 +31,89 @@ R_to_main = np.array([
     [-np.sin(theta), 0, np.cos(theta)]
 ])
 
-payload_lock = threading.Lock()
-payload = None
-counter = 0
-empty_payload = struct.pack('<BBBBfffQ', HEADER, counter, math.nan, math.nan, math.nan, (time.time_ns() // 1000))
-slave = SimpleI2CSlave(SLAVE_ADDRESS)
+# --- GLOBAL Variables and Import specific Libraries for WiFi ---
+if COMMUNICATION_METHOD == "wifi":
+    HEADER = 0xFAF320
+    import socket
+    HOST = "192.168.7.29"
+    PORT = 6002
+    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+# --- GLOBAL Variables and Import specific Libraries for I2C ---
+elif COMMUNICATION_METHOD == "i2c":
+    import queue
+    import threading
+    from communication.i2c_slave_emulated import SimpleI2CSlave
+    DATA_READY_GPIO = 17
+    MAX_ARUCO_LENGTH = 12
+    SLAVE_ADDRESS = 0x08
+    HEADER = 0xEB90
+    data_queue = queue.Queue(maxsize = 500)
+    aruco_detect_queue = queue.Queue(maxsize = 500)
+    payload_data = None
+    counter = 0
+    slave = SimpleI2CSlave(SLAVE_ADDRESS, DATA_READY_GPIO)
+
+_gui_available = None
+
+def is_gui_available():
+    """
+    Check if the script can display a GUI.
+    This is the most reliable method and works on all platforms.
+    """
+    global _gui_available
+    if _gui_available is None:
+        try:
+            # Create a named window
+            cv2.namedWindow("test_window", cv2.WINDOW_NORMAL)
+            # Attempt to move it
+            cv2.moveWindow("test_window", 100, 100)
+            # Destroy it immediately
+            cv2.destroyWindow("test_window")
+            _gui_available = True
+            print("GUI is available.")
+        except cv2.error:
+            _gui_available = False
+            print("GUI is not available (running in a headless environment or as a service).")
+    return _gui_available
+
+def should_send_pose(current_pose, last_pose):
+    if last_pose is None:
+        return True
+    
+    dx = current_pose[0] - last_pose[0]
+    dy = current_pose[1] - last_pose[1]
+    dz = current_pose[2] - last_pose[2]
+    dist_squared = dx**2 + dy**2 + dz**2
+    return dist_squared >= POSE_DIFF_THRESHOLD**2
+
+def decode_bsc_status(status: int):
+    return {
+        "bytes_copied_to_fifo": (status >> 16) & 0x1F,
+        "rx_fifo_bytes":          (status >> 11) & 0x1F,
+        "tx_fifo_bytes":          (status >> 6)  & 0x1F,
+        "tx_fifo_full":           bool((status >> 2) & 1),
+        "tx_fifo_empty":          bool((status >> 5) & 1),
+        "tx_busy":                bool((status >> 1) & 1),
+        "rx_empty":               bool((status >> 2) & 1),
+    }
+   
+def try_send_data(addr, data, data_len):
+    control_abort = (addr << 16) | 0x385
+    slave.pi.bsc_xfer(control_abort, b'')
+    control_send = (addr << 16) | 0x305
+    status, _, _ = slave.pi.bsc_xfer(control_send, data)
+    st = decode_bsc_status(status)
+    print(f"Queued {st['bytes_copied_to_fifo']} bytes, FIFO now has {st['tx_fifo_bytes']} bytes")
+    if st['bytes_copied_to_fifo'] == data_len:
+        slave.pi.write(DATA_READY_GPIO, 1)
+        return True
+    else:
+        return False
+
+def clear_data_ready_signal():
+    slave.pi.write(DATA_READY_GPIO, 0)
+    
 def slave_listener(stop_event):
     delay_time = DELAY_TIME
     global payload,empty_payload
@@ -203,8 +280,65 @@ def main():
 
     # Initial state (0 position, 0 velocity)
     kalman.statePost = np.zeros((6, 1), dtype=np.float32)
+    return kalman
+
+def send_pose(pose, num_of_aruco, aruco_list):
+    global udp_socket
+    x, y, z = pose
+    timestamp = time.time_ns() // 1000
+    payload = None
+    try:
+        header_bytes = ((HEADER >> 16) & 0xFF, (HEADER >> 8) & 0xFF, HEADER & 0xFF)
+        payload_format = f'<BBB3fQ{num_of_aruco}B'
+        payload = struct.pack(payload_format, *header_bytes, x, y, z, timestamp, *aruco_list)
+        udp_socket.sendto(payload, (HOST, PORT))
+        
+    except Exception as e:
+        print(f"[UDP ERROR] Failed to send pose: {e}")
+
+def main():
     
-    filtered_pos = 0
+    global counter, payload_data, data_queue, aruco_detect_queue, udp_socket, last_sent_pose
+    # --- Generate Aruco board for camera calibration ---
+    is_gui_available()
+    if GENERATE_ARUCO_BOARD:
+        try:
+            import random
+            generate_aruco_board()
+        
+        except RuntimeError as e:
+            print(f"[ARUCO BOARD ERROR] {e}")
+     
+    # --- Camera Calibration ---        
+    recalibrate = False
+    camera = Camera()
+
+    while not recalibrate:
+        mean_error = camera.calibrate_camera()
+        if mean_error < 0.5:
+            print("Calibration is GOOD ✅")
+            recalibrate = True
+        
+        else:
+            print("Retrying calibration. Got error:", mean_error)
+        
+    detector = Detection(known_markers_path="core/utils/known_markers.json")
+    
+    # Choose communication method: 'wifi' or 'i2c'
+    if COMMUNICATION_METHOD == 'i2c':
+        stop_event = threading.Event()
+        threading.Thread(target=slave_listener,args=(stop_event,), daemon=True).start()
+        
+    # --- Open Camera for Video Capturing ---
+    video = cv2.VideoCapture(0)
+    if not video.isOpened():
+        print("Error: Could not Open Video")
+        sys.exit(1)
+    
+    kalman = kalman_filter_config()
+    filtered_pos = None
+    
+    # Main thread displays
     while True:
 
             ret, frame = video.read()
@@ -276,9 +410,15 @@ def main():
                 print("[ERROR] twoDArray or threeDArray is None!")
                 with payload_lock:
                     counter = (counter + 1) % 256
-                    payload = empty_payload
-                
-            cv2.imshow("Detection", frame)
+                    # Create float16 NaNs for x, y, z
+                    pose_nan = np.array([np.nan, np.nan, np.nan], dtype=np.float16).view(np.uint16)
+                    timestamp = (time.time_ns() // 1000) & 0xFFFFFFFF
+                    payload_data = struct.pack('<BBBB3HI', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x01, pose_nan[0], pose_nan[0], pose_nan[0], timestamp)
+                    data_queue.put(payload_data)
+                    payload_data = struct.pack('<BBBBB', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x02, 0)
+                    aruco_detect_queue.put(payload_data)
+            if _gui_available: 
+                cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 stop_event.set()  # <<<<<< Tell all threads to stop
                 break

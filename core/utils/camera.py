@@ -12,7 +12,7 @@ import glob
 4. Press 'q' to quit.
 '''
 
-def generate_data_for_calibrate():
+def generate_data_for_calibrate(gui_available):
     camera = cv2.VideoCapture(0)
     ret, img = camera.read()
 
@@ -22,12 +22,14 @@ def generate_data_for_calibrate():
     while True:
         name = path + str(count)+".jpg"
         ret, img = camera.read()
-        cv2.imshow("img", img)
+        if gui_available:
+            cv2.imshow("img", img)
 
         key = cv2.waitKey(10) & 0xFF
         if key == ord('c'):
             cv2.imwrite(name, img)
-            cv2.imshow("img", img)
+            if gui_available:
+                cv2.imshow("img", img)
             count += 1
         elif key == ord('q'):
             cv2.destroyAllWindows()
@@ -47,7 +49,7 @@ def generate_charuco_board(squaresX: int = 14, squaresY: int = 10, squareLength:
 class Camera:
     def __init__(self, camera_id=0, camera_name="robot", camera_type="onboard", 
                  charuco_rows=10, charuco_cols=14, square_length=0.04, marker_length=0.032, 
-                 save_path="camera_calib.yaml"):
+                 save_path="camera_calib.yaml", gui_available = False):
         
         self.camera_id = camera_id
         self.camera_name = camera_name
@@ -61,6 +63,7 @@ class Camera:
         self.charuco_board = generate_charuco_board(self.CHARUCO_COLS, self.CHARUCO_ROWS, self.SQUARE_LENGTH, self.MARKER_LENGTH)
         self.camera_matrix = None
         self.dist_coeffs = None
+        self.gui_available = gui_available
 
     def __repr__(self):
         return f"Camera(id={self.camera_id}, name={self.camera_name}, type={self.camera_type})"
@@ -70,7 +73,7 @@ class Camera:
         images_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "aruco_data")
         if not os.path.exists(images_folder) or not any(fname.endswith(".jpg") for fname in os.listdir(images_folder)):
             print("📂 No images found — generating calibration data...")
-            generate_data_for_calibrate()
+            generate_data_for_calibrate(self.gui_available)
         else:
             print("📂 Existing images detected — skipping data generating...")
         # === CONFIGURATION ===
