@@ -5,26 +5,14 @@ import numpy as np
 from utils import Camera
 from detection import Detection
 import sys
-import random
-import socket
-import json
-from communication.i2c_slave_emulated import SimpleI2CSlave
-import threading
-import math
 
-# --- GLOBAL Variables --- 
-HOST = ""
-PORT = 6002
-SLAVE_ADDRESS = 0x08
-DELAY_TIME = 0.001
-COMMUNICATION_METHOD = 'i2c'  # ← change to 'WiFi or i2c' when needed
-GENERATE_ARUCO_BOARD = True
-
+# --- General GLOBAL Variables --- 
+COMMUNICATION_METHOD = 'wifi'  # ← change to 'WiFi or i2c' when needed
+GENERATE_ARUCO_BOARD = False
 CAMERA_ROTATION_DEG = 90  # or any angle
 theta = np.radians(CAMERA_ROTATION_DEG)
-
-HEADER = 0xFAF320
-
+POSE_DIFF_THRESHOLD = 0.01  # 1 cm
+last_sent_pose = None
 R_to_main = np.array([
     [ np.cos(theta), 0, np.sin(theta)],
     [ 0,             1, 0            ],
@@ -115,31 +103,41 @@ def clear_data_ready_signal():
     slave.pi.write(DATA_READY_GPIO, 0)
     
 def slave_listener(stop_event):
-    delay_time = DELAY_TIME
-    global payload,empty_payload
+    slave.pi.write(DATA_READY_GPIO, 1)
+    global data_queue, aruco_detect_queue
+    is_pose_turn = True
+    game_start = False
+    push_new_data = True  # allow sending new data
     try:
         while not stop_event.is_set():
-            with payload_lock:
-                if payload is not None:
-                    if payload != response:
-                        response = payload
-                    else:
-                        response = empty_payload
-                    
-            slave.pi.bsc_i2c(slave.address, response)   
             status, bytes_read, rx_data = slave.pi.bsc_i2c(slave.address)
-            print(f"[I2C_Slave] : the status is {status}")
-            if bytes_read == 1 and rx_data[0] == 0:  # If master is reading from us
-                print("[I2C] Master read detected → sent payload")
-                
-            if status & 0x10:
-                delay_time = delay_time - (delay_time / 2)
-                
-            elif status & 0x4:
-                delay_time = delay_time + (delay_time / 2)
+            if not game_start and bytes_read > 0 and rx_data[0] == 0xA5:
+                clear_data_ready_signal()
+                game_start = True
+            
+            if game_start:
+            # Master read acknowledgment
+                if bytes_read > 0 and rx_data[0] == 0x00:
+                    push_new_data = True  # Master read previous packet
+                    clear_data_ready_signal()
 
-            time.sleep(delay_time)
-        
+                if push_new_data:
+                    if is_pose_turn and not data_queue.empty():
+                        data = data_queue.queue[0]  # Peek
+                    elif not is_pose_turn and not aruco_detect_queue.empty():
+                        data = aruco_detect_queue.queue[0]
+                    else:
+                        continue
+
+                    if try_send_data(slave.address, data, len(data)):
+                        if is_pose_turn:
+                            data_queue.get()  # Remove after successful send
+                        else:
+                            aruco_detect_queue.get()
+                            
+                        is_pose_turn = not is_pose_turn
+                        push_new_data = False
+                    
     except KeyboardInterrupt:
         slave.close()
 
@@ -177,15 +175,16 @@ def generate_aruco_board():
             if all(np.linalg.norm(candidate[:2] - p[:2]) >= (marker_size_m + min_spacing_m) for p in positions):
                 positions.append(candidate)
             attempts += 1
-            if attempts > 5000:
-                print("⚠️ Warning: Too many placement attempts. Returning what was placed.")
+            if attempts > 10000:
+                print("⚠️ Warning: Too many placement attempts. Proceeding with fewer markers.")
                 break
         return positions
 
     # Generate safe marker positions
     positions_list = generate_safe_positions(len(marker_ids), marker_size_m, min_spacing_m)
     if len(positions_list) < len(marker_ids):
-        raise RuntimeError("❌ Failed to generate safe positions for all markers.")
+        print(f"⚠️ Only {len(positions_list)} out of {len(marker_ids)} markers were placed safely.")
+        marker_ids = marker_ids[:len(positions_list)]
     positions_m = {id: pos for id, pos in zip(marker_ids, positions_list)}
 
     # Center point on canvas
@@ -217,48 +216,7 @@ def generate_aruco_board():
         x, y, z = positions_m[marker_id]
         print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
 
-def send_pose(method, pose):
-    x, y, z = pose
-    if method == "wifi":
-        pose_packet = {
-            "x": x,
-            "y": y,
-            "z": z,
-            "timestamp": time.time()
-        }
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.connect((HOST, PORT))
-            sock.sendall(json.dumps(pose_packet).encode('utf-8'))
-
-def main():
-
-    if GENERATE_ARUCO_BOARD:
-        try:
-            generate_aruco_board()
-        
-        except RuntimeError as e:
-            print(f"[ARUCO BOARD ERROR] {e}")
-    recalibrate = False
-    camera = Camera()
-
-    while not recalibrate:
-        mean_error = camera.calibrate_camera()
-        if mean_error < 0.5:
-            print("Calibration is GOOD ✅")
-            recalibrate = True
-        
-    detector = Detection(known_markers_path="core/utils/known_markers.json")
-    stop_event = threading.Event()
-    # Choose communication method: 'wifi' or 'i2c'
-    if COMMUNICATION_METHOD == 'i2c':
-        threading.Thread(target=slave_listener,args=(stop_event,), daemon=True).start()
-        
-    video = cv2.VideoCapture(0)
-    if not video.isOpened():
-        print("Error: Could not Open Video")
-        sys.exit(1)
-    # Main thread displays
-    
+def kalman_filter_config():
     # === Kalman Filter Configuration ===
     kalman = cv2.KalmanFilter(6, 3)  # 6 state variables (pos + velocity), 3 measurements (pos only)
     # Transition matrix (state update: x = Ax + Bu + w)
@@ -273,11 +231,10 @@ def main():
 
     #Measurement matrix (we only measure position)
     kalman.measurementMatrix = np.eye(3, 6, dtype=np.float32)
-
     kalman.processNoiseCov = np.eye(6, dtype=np.float32) * 1e-4
     kalman.measurementNoiseCov = np.eye(3, dtype=np.float32) * 1e-2
     kalman.errorCovPost = np.eye(6, dtype=np.float32)
-
+    
     # Initial state (0 position, 0 velocity)
     kalman.statePost = np.zeros((6, 1), dtype=np.float32)
     return kalman
@@ -345,8 +302,7 @@ def main():
             if not ret:
                 break
             
-            corners, twoDArray, threeDArray, threeDCenters, frame = detector.aruco_detect(frame=frame)
-            
+            corners, twoDArray, threeDArray, threeDCenters, frame, aruco_ids = detector.aruco_detect(frame=frame)
             if twoDArray is not None and threeDArray is not None:
                 if twoDArray.shape[0] < 3:
                     if len(twoDArray) == 2 and len(threeDArray) == 2:
@@ -396,19 +352,33 @@ def main():
                         kalman.correct(measured)
                         predicted = kalman.predict()
                         filtered_pos = predicted[:3]
-                        
+                    
+                aruco_id_list = np.array(aruco_ids).flatten().tolist() if aruco_ids is not None else []
+                if COMMUNICATION_METHOD == 'i2c':
+                    aruco_id_list = aruco_id_list[:MAX_ARUCO_LENGTH]
+    
+                num_of_aruco_ids = len(aruco_id_list)
                 pose_global = (R_to_main @ filtered_pos).flatten()
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
-                with payload_lock:
+                if COMMUNICATION_METHOD == "i2c" and (not data_queue.full()) and (not aruco_detect_queue.full()):
                     counter = (counter + 1) % 256
-                    payload = struct.pack('<BBBBfffQ',HEADER, counter, pose_global[0], pose_global[1], pose_global[2], (time.time_ns() // 1000))
-                send_pose(COMMUNICATION_METHOD, tuple(pose_global))
+                    pose = np.array(pose_global, dtype = np.float16).view(np.uint16)
+                    timestamp = (time.time_ns() // 1000) & 0xFFFFFFFF
+                    payload_data = struct.pack('<BBBB3HI', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x01, pose[0], pose[1], pose[2], timestamp)
+                    data_queue.put(payload_data)
+                    payload_data = struct.pack(f'<BBBBB{num_of_aruco_ids}B', ((HEADER >> 8) & 0xFF),  (HEADER & 0xFF), counter, 0x02, num_of_aruco_ids, *aruco_id_list)
+                    aruco_detect_queue.put(payload_data)
+                
+                if should_send_pose(tuple(pose_global), last_sent_pose):
+                    send_pose(tuple(pose_global), num_of_aruco_ids, aruco_id_list)
+                    last_sent_pose = tuple(pose_global)
+                    
                 #print Average Camera Position
-                print(f"Filtered Camera Position -> X: {pose_global[0]:.2f}, Y: {pose_global[1]:.2f}, Z: {pose_global[2]:.2f}")
+                print(f"Filtered Camera Position -> X: {pose_global[0]:.4f}, Y: {pose_global[1]:.4f}, Z: {pose_global[2]:.4f}")
     
             else:
                 print("[ERROR] twoDArray or threeDArray is None!")
-                with payload_lock:
+                if COMMUNICATION_METHOD == "i2c" and (not data_queue.full()) and (not aruco_detect_queue.full()):
                     counter = (counter + 1) % 256
                     # Create float16 NaNs for x, y, z
                     pose_nan = np.array([np.nan, np.nan, np.nan], dtype=np.float16).view(np.uint16)
