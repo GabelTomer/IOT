@@ -95,6 +95,11 @@ def plot_updater_thread(aggregator, stop_event, flaskServer = None):
 def send_command(cmd):
     if not hasattr(send_command, 'last_cmd_time'):
         send_command.last_cmd_time = 0
+    if not hasattr(send_command, 'last_cmd'):
+        send_command.last_cmd = cmd
+
+    if send_command.last_cmd == cmd and not "short" in cmd:
+        return
     if abs(time.time()-send_command.last_cmd_time) <= COMMAND_COOLDOWN:
         return
     url = f"http://{CAR_IP}/{cmd}"
