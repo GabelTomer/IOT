@@ -344,7 +344,7 @@ def main():
     aggregator = PoseAggregator()
     stop_event = threading.Event()
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
-    threading.Thread(target=plot_updater_thread, args = (aggregator, stop_event), daemon=True).start()
+    threading.Thread(target=plot_updater_thread, args = (aggregator, stop_event, flaskServer), daemon=True).start()
     server_thread.start()
     
     if COMMUNICATION_METHOD == "i2c":
