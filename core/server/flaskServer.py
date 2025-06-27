@@ -155,7 +155,6 @@ class server:
         @self.app.route('/get_position')
         def get_position():
             dataToSend = self.getPos()
-            dataToSend["timestamp"] = time.time()
             return jsonify(dataToSend)
         
         @self.app.route('/get_aruco_list')
