@@ -42,6 +42,29 @@ elif COMMUNICATION_METHOD == "i2c":
     counter = 0
     slave = SimpleI2CSlave(SLAVE_ADDRESS, DATA_READY_GPIO)
 
+_gui_available = None
+
+def is_gui_available():
+    """
+    Check if the script can display a GUI.
+    This is the most reliable method and works on all platforms.
+    """
+    global _gui_available
+    if _gui_available is None:
+        try:
+            # Create a named window
+            cv2.namedWindow("test_window", cv2.WINDOW_NORMAL)
+            # Attempt to move it
+            cv2.moveWindow("test_window", 100, 100)
+            # Destroy it immediately
+            cv2.destroyWindow("test_window")
+            _gui_available = True
+            print("GUI is available.")
+        except cv2.error:
+            _gui_available = False
+            print("GUI is not available (running in a headless environment or as a service).")
+    return _gui_available
+
 def should_send_pose(current_pose, last_pose):
     if last_pose is None:
         return True
@@ -234,6 +257,7 @@ def main():
     
     global counter, payload_data, data_queue, aruco_detect_queue, udp_socket, last_sent_pose
     # --- Generate Aruco board for camera calibration ---
+    is_gui_available()
     if GENERATE_ARUCO_BOARD:
         try:
             import random
@@ -363,8 +387,8 @@ def main():
                     data_queue.put(payload_data)
                     payload_data = struct.pack('<BBBBB', ((HEADER >> 8) & 0xFF), (HEADER & 0xFF), counter, 0x02, 0)
                     aruco_detect_queue.put(payload_data)
-                
-            cv2.imshow("Detection", frame)
+            if _gui_available: 
+                cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 stop_event.set()  # <<<<<< Tell all threads to stop
                 break

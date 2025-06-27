@@ -43,7 +43,28 @@ aruco_ids = []
 aruco_ids_lock = threading.Lock()
 known_markers = {}
 
+_gui_available = None
 
+def is_gui_available():
+    """
+    Check if the script can display a GUI.
+    This is the most reliable method and works on all platforms.
+    """
+    global _gui_available
+    if _gui_available is None:
+        try:
+            # Create a named window
+            cv2.namedWindow("test_window", cv2.WINDOW_NORMAL)
+            # Attempt to move it
+            cv2.moveWindow("test_window", 100, 100)
+            # Destroy it immediately
+            cv2.destroyWindow("test_window")
+            _gui_available = True
+            print("GUI is available.")
+        except cv2.error:
+            _gui_available = False
+            print("GUI is not available (running in a headless environment or as a service).")
+    return _gui_available
 
 def make_callback(addr):
     global ready_flags
@@ -293,6 +314,7 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
             print(f"[I2C Listener] Fatal error: {e}")
                    
 def main():
+    is_gui_available()
     global known_markers
     # --- Generate Aruco board for camera calibration ---
     if GENERATE_ARUCO_BOARD:
@@ -305,7 +327,7 @@ def main():
     
     # --- Camera Calibration ---   
     recalibrate = False
-    camera = Camera()
+    camera = Camera(gui_available=_gui_available)
 
     while not recalibrate:
         mean_error = camera.calibrate_camera()
@@ -416,8 +438,8 @@ def main():
                     print(f"Filtered Camera Position -> X: {x:.4f}, Y: {y:.4f}, Z: {z:.4f}")
     
 
-                
-            cv2.imshow("Detection", frame)
+            if _gui_available:
+                cv2.imshow("Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 stop_event.set()  # <<<<<< Tell all threads to stop
                 break
