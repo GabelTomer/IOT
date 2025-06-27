@@ -488,9 +488,9 @@ def main():
                     delta_y = current_pos['y'] - previous_pos['y']
                     if delta_x != 0 or delta_y != 0:
                         R, _ = cv2.Rodrigues(rvec)
-                        R_cam2world = - R.T @ tvec
-                        forward_vec = R_cam2world @ np.array[0,1,1]
-                        robot_heading = math.atan2(forward_vec[1], forward_vec[0]) #y,x
+                        # Camera facing forward = Z-axis; extract forward direction
+                        forward_vector = R.T @ np.array([0, 0, 1])  # Z-axis in world coordinates
+                        robot_heading = math.atan2(forward_vector[1], forward_vector[0])  # Y, X
 
                 if distance < REACHED_THRESHOLD:
                     send_command("stop")
@@ -505,14 +505,13 @@ def main():
                     send_command("stop")
                     print("=== Reached Target ===")
                 else:
-                    if abs(heading_error) < math.degrees(5):
+                    if abs(heading_error) < 5:
                         send_command("forward")
-                    elif heading_error > math.radians(5):
+                    elif heading_error > 5:
                         send_command("leftShort")
-                        # send_command("forward")
-                    elif heading_error < -math.radians(5):
+                    elif heading_error < -5:
                         send_command("rightShort")
-                        # send_command("forward")
+
 
                 previous_pos = current_pos
 
