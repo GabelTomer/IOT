@@ -329,7 +329,9 @@ class FlaskClientUI(QWidget):
         try:
             response = requests.get(f"{self.server_url}/get_aruco_list", timeout=2)
             response.raise_for_status()
-            arucoList = response.json()
+            data = response.json()
+            if not  isinstance(data, str) :
+                arucoList = data.get("list")
             update_pose_visual_and_stats(self.fig, self.ax,"3D Visualization",data, arucoList)
         except Exception:
             print("No Aruco List")
