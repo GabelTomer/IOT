@@ -5,7 +5,7 @@ import time
 
 class server:
     def __init__(self,  port = 5000, known_markers_path=None, detector=None):
-        self.target_position = {'x': 0.0, 'y': 0.0, 'z': 0.0}
+        self.target_position = None
         self.detector = detector
         self.chosen_room = None
         self.known_markers = self.load_known_markers(known_markers_path) if known_markers_path else {}

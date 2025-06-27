@@ -410,10 +410,7 @@ def main():
                 break
             
             corners, twoDArray, threeDArray, threeDCenters, frame, aruco_markers_detected = detector.aruco_detect(frame=frame)
-            
-            current_pos = flaskServer.getPos()
-            target_pos = flaskServer.get_target()
-            
+                        
             if twoDArray is not None and threeDArray is not None:
                 if twoDArray.shape[0] < 3:
                     if len(twoDArray) == 2 and len(threeDArray) == 2:
@@ -477,43 +474,42 @@ def main():
     
                 current_pos = flaskServer.getPos()
                 target_pos = flaskServer.get_target()
-                print(f"Target position: {target_pos}")
+                if target_pos is not None:
+                    print(f"Target position: {target_pos}")
 
-                dx = target_pos['x'] - current_pos['x']
-                dy = target_pos['y'] - current_pos['y']
-                distance = math.hypot(dx, dy)
+                    dx = target_pos['x'] - current_pos['x']
+                    dy = target_pos['y'] - current_pos['y']
+                    distance = math.hypot(dx, dy)
 
-                if previous_pos:
-                    delta_x = current_pos['x'] - previous_pos['x']
-                    delta_y = current_pos['y'] - previous_pos['y']
-                    if delta_x != 0 or delta_y != 0:
-                        R, _ = cv2.Rodrigues(rvec)
-                        # Camera facing forward = Z-axis; extract forward direction
-                        forward_vector = R.T @ np.array([0, 0, 1])  # Z-axis in world coordinates
-                        robot_heading = math.atan2(forward_vector[1], forward_vector[0])  # Y, X
+                    if previous_pos:
+                        delta_x = current_pos['x'] - previous_pos['x']
+                        delta_y = current_pos['y'] - previous_pos['y']
+                        if delta_x != 0 or delta_y != 0:
+                            R, _ = cv2.Rodrigues(rvec)
+                            # Camera facing forward = Z-axis; extract forward direction
+                            forward_vector = R.T @ np.array([0, 0, 1])  # Z-axis in world coordinates
+                            robot_heading = math.atan2(forward_vector[1], forward_vector[0])  # Y, X
 
-                if distance < REACHED_THRESHOLD:
-                    send_command("stop")
-                else:
-                    angle_to_target = math.atan2(dy, dx)
-                    heading_error = angle_to_target - robot_heading
-                    heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error)) # Normalize to get the shortets rotation 
-                    heading_error = math.degrees(heading_error)
+                    if distance < REACHED_THRESHOLD:
+                        send_command("stop")
+                        flaskServer.target_position = None
+                        print("=== Reached Target ===")
+                    else:
+                        angle_to_target = math.atan2(dy, dx)
+                        heading_error = angle_to_target - robot_heading
+                        heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error)) # Normalize to get the shortets rotation 
+                        heading_error = math.degrees(heading_error)
 
-                # Simple steering logic
-                if distance < REACHED_THRESHOLD:
-                    send_command("stop")
-                    print("=== Reached Target ===")
-                else:
-                    if abs(heading_error) < 5:
-                        send_command("forward")
-                    elif heading_error > 5:
-                        send_command("leftShort")
-                    elif heading_error < -5:
-                        send_command("rightShort")
+                        # Simple steering logic
+                        if abs(heading_error) < 5:
+                            send_command("forward")
+                        elif heading_error > 5:
+                            send_command("leftShort")
+                        elif heading_error < -5:
+                            send_command("rightShort")
 
 
-                previous_pos = current_pos
+                    previous_pos = current_pos
 
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
             
