@@ -191,6 +191,8 @@ class server:
         def set_target():
             data = request.get_json()
             if 'x' in data and 'y' in data:
+                if self.target_position is None:
+                    self.target_position = {}
                 with self.lock:
                     self.target_position['x'] = data['x']
                     self.target_position['y'] = data['y']
