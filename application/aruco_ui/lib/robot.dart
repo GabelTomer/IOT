@@ -54,6 +54,7 @@ class _RobotControl extends State<RobotControl> {
   String robotPosition = "Fetching...";
   double robotX = 0;
   double robotY = 0;
+  Offset? targetPositionWorld;
   bool isConnected = false;
   int lastKnownMarkerId = 0;
   final int robotIconSize = 30;
@@ -594,6 +595,9 @@ class _RobotControl extends State<RobotControl> {
 
                           if (confirm == true) {
                             final worldPos = screenToWorld(lastTapPosition!);
+                            setState(() {
+                              targetPositionWorld = worldPos; 
+                            });
                             handleMapTap(worldPos);
                           }
                         },
@@ -670,9 +674,9 @@ class _RobotControl extends State<RobotControl> {
                                     marker.value.z,
                                   ),
                               child: Icon(
-                                Icons.location_on,
+                                Icons.qr_code_2,
                                 size: markerIconSize.toDouble(),
-                                color: Colors.red,
+                                color: Colors.black,
                               ),
                             ),
                           ),
@@ -695,9 +699,30 @@ class _RobotControl extends State<RobotControl> {
                             ).dy -
                             robotIconSize,
                         child: Icon(
-                          Icons.android,
+                          Icons.directions_car_rounded,
                           size: robotIconSize.toDouble(),
-                          color: Colors.green,
+                          color: Colors.blue,
+                        ),
+                      ),
+                      // destination position
+                      if (targetPositionWorld != null)
+                        Positioned(
+                          left: worldToScreen(
+                            targetPositionWorld!,
+                            roomOrigin,
+                            pixelsPerMeterWidth,
+                            pixelsPerMeterHeight,
+                          ).dx - markerIconSize / 2, // center the icon
+                          top: worldToScreen(
+                            targetPositionWorld!,
+                            roomOrigin,
+                            pixelsPerMeterWidth,
+                            pixelsPerMeterHeight,
+                          ).dy - markerIconSize,
+                          child: Icon(
+                            Icons.location_on,
+                            size: markerIconSize.toDouble(),
+                            color: Colors.red,
                         ),
                       ),
                     ],
