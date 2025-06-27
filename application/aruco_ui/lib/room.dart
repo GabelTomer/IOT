@@ -37,8 +37,35 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showInitialRoomDimensionDialog();
+      _showDefinitionMethodDialog();
     });
+  }
+
+  void _showDefinitionMethodDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (context) => AlertDialog(
+            title: Text('How would you like to define the room?'),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _showInitialRoomDimensionDialog(); // Freeform drawing
+                },
+                child: Text('Draw Room'),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _showCoordinateInputDialog(); // Coordinate input
+                },
+                child: Text('Enter Coordinates'),
+              ),
+            ],
+          ),
+    );
   }
 
   void _showInitialRoomDimensionDialog() {
@@ -93,6 +120,173 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
           ),
     );
   }
+
+  void _showCoordinateInputDialog() {
+  final List<TextEditingController> xControllers = [];
+  final List<TextEditingController> yControllers = [];
+
+  // Initialize with 3 default points
+  for (int i = 0; i < 3; i++) {
+    xControllers.add(TextEditingController());
+    yControllers.add(TextEditingController());
+  }
+
+  void addPointField() {
+    xControllers.add(TextEditingController());
+    yControllers.add(TextEditingController());
+  }
+
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (context) {
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text('Define Room Coordinates'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Enter at least 3 points (meters). First point is treated as the origin.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                  ),
+                  const SizedBox(height: 8),
+                  for (int i = 0; i < xControllers.length; i++)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: xControllers[i],
+                            decoration: InputDecoration(labelText: 'X${i + 1}'),
+                            keyboardType: TextInputType.numberWithOptions(decimal: true),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: yControllers[i],
+                            decoration: InputDecoration(labelText: 'Y${i + 1}'),
+                            keyboardType: TextInputType.numberWithOptions(decimal: true),
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.delete, color: Colors.red),
+                          onPressed: () {
+                            if (xControllers.length > 3) {
+                              setDialogState(() {
+                                xControllers.removeAt(i);
+                                yControllers.removeAt(i);
+                              });
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  const SizedBox(height: 10),
+                  TextButton.icon(
+                    onPressed: () {
+                      setDialogState(() {
+                        addPointField();
+                      });
+                    },
+                    icon: Icon(Icons.add),
+                    label: Text('Add Point'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                },
+                child: Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  try {
+                    final coords = <Offset>[];
+
+                    for (int i = 0; i < xControllers.length; i++) {
+                      final x = double.tryParse(xControllers[i].text);
+                      final y = double.tryParse(yControllers[i].text);
+                      if (x == null || y == null) {
+                        throw FormatException('Invalid number at point ${i + 1}');
+                      }
+                      coords.add(Offset(x, y));
+                    }
+
+                    if (coords.length < 3) {
+                      throw FormatException('At least 3 points are required.');
+                    }
+
+                    final minX = coords.map((p) => p.dx).reduce(min);
+                    final minY = coords.map((p) => p.dy).reduce(min);
+                    final maxX = coords.map((p) => p.dx).reduce(max);
+                    final maxY = coords.map((p) => p.dy).reduce(max);
+
+                    final widthMeters = maxX - minX;
+                    final heightMeters = maxY - minY;
+
+                    final canvas = canvasSize ?? MediaQuery.of(context).size;
+                    final scaleX = canvas.width / widthMeters;
+                    final scaleY = canvas.height / heightMeters;
+
+                    setState(() {
+                      roomWidthMeters = widthMeters;
+                      roomHeightMeters = heightMeters;
+                      meterToPixelX = scaleX;
+                      meterToPixelY = scaleY;
+
+                      points.clear();
+                      for (var coord in coords) {
+                        points.add(Offset(
+                          (coord.dx - minX) * meterToPixelX,
+                          (coord.dy - minY) * meterToPixelY,
+                        ));
+                      }
+
+                      origin = points.isNotEmpty ? points[0] : null;
+
+                      // Centering
+                      final minPx = points.map((p) => p.dx).reduce(min);
+                      final maxPx = points.map((p) => p.dx).reduce(max);
+                      final minPy = points.map((p) => p.dy).reduce(min);
+                      final maxPy = points.map((p) => p.dy).reduce(max);
+                      final roomPixelWidth = maxPx - minPx;
+                      final roomPixelHeight = maxPy - minPy;
+
+                      final dx = (canvas.width - roomPixelWidth) / 2 - minPx;
+                      final dy = (canvas.height - roomPixelHeight) / 2 - minPy;
+
+                      for (int i = 0; i < points.length; i++) {
+                        points[i] = points[i].translate(dx, dy);
+                      }
+                      if (origin != null) {
+                        origin = origin!.translate(dx, dy);
+                      }
+                    });
+
+                    Navigator.pop(context);
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(e.toString()),
+                      ),
+                    );
+                  }
+                },
+                child: Text('Apply'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}
 
   void handleTap(TapUpDetails details) {
     final localPos = details.localPosition;
@@ -176,8 +370,9 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
   ) {
     if (canvasSize == null ||
         roomWidthMeters == null ||
-        roomHeightMeters == null)
+        roomHeightMeters == null) {
       return;
+    }
     double maxWidth = 0;
     double maxHeight = 0;
     for (int i = 0; i < points.length; i++) {
@@ -334,7 +529,7 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
               }
             },
           ),
-          
+
           IconButton(
             icon: Icon(Icons.save),
             onPressed: () => _showRoomDimensionsDialog(context),
@@ -573,11 +768,13 @@ class _RoomSelectorPageState extends State<RoomSelectorPage> {
                       return;
                     }
                     addRoom(newRoom);
+                    
                     setState(() {
                       roomNames.add(newRoom);
                     });
                   }
                   Navigator.pop(context);
+                  openRoomCustomizer(newRoom);
                 },
                 child: Text('Add'),
               ),
