@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import os
 import matplotlib.patheffects as pe
-
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 def is_valid_ip(ip: str) -> bool:
     import re
     pattern = re.compile(
@@ -89,7 +89,11 @@ def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = '
     # Draw lines from each detected ArUco marker center to the current pose
     if markers is not None:
         for marker in markers:
-            cx, cy, cz = known_markers[str(marker)]
+            if marker == "origin" or marker == "boundry" or marker == "width" or marker == "height":
+                    # Skip origin and boundary markers
+                    continue
+            aruco_marker = known_markers[str(marker)]
+            cx, cy, cz = aruco_marker.get("x"), aruco_marker.get("y"), aruco_marker.get("z")
             dx, dy, dz = x - cx, y - cy, z - cz
             ax.quiver(cx, cy, cz, dx, dy, dz, color = 'r', arrow_length_ratio = 0.05)
 
@@ -119,8 +123,9 @@ def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = '
         print("[Plot Error] Failed to compute stats overlay:", e)
 
     
-    fig.canvas.draw()
-    fig.canvas.flush_events()
+    canvas = fig.canvas
+    if hasattr(canvas, "draw"):
+        canvas.draw()
 
 class MarkerManager(QWidget):
     def __init__(self, server_ip, room):
@@ -161,11 +166,12 @@ class MarkerManager(QWidget):
         self.load_markers()
 
     def load_markers(self):
+        global known_markers
         try:
             resp = requests.get(f"{self.server_url}/get_Known_Markers/{self.room}", timeout=2)
             resp.raise_for_status()
             markers = resp.json()  # Expects dict like {"1": {"x":1, "y":1, "z":1}, ...}
-
+            known_markers = markers
             self.marker_table.setRowCount(0)
             for row, (mid, coords) in enumerate(markers.items()):
                 if mid == "origin" or mid == "boundry" or mid == "width" or mid == "height":
@@ -260,9 +266,11 @@ class FlaskClientUI(QWidget):
         self.room = selected_room
         self.server_url = f"http://{server_ip}:5000"
         self.setWindowTitle("Barcode Locolaization Client")
-        self.setFixedSize(500, 400)
+        #self.setFixedSize(500, 400)
         self.fig = plt.figure()
-        self.ax = self.fig.add_subplot(111, projection = '3d')
+        self.ax = self.fig.add_subplot(111, projection='3d')
+        self.canvas = FigureCanvas(self.fig)  # create canvas from figure
+        self.canvas.setMinimumHeight(300) 
         self.layout = QVBoxLayout()
 
         self.room_selector = QComboBox()
@@ -292,11 +300,11 @@ class FlaskClientUI(QWidget):
         self.layout.addWidget(self.position_label)
         self.layout.addWidget(self.status_label)
         self.layout.addLayout(btn_layout)
-
+        
         # Add MarkerManager widget below the room controls
         self.marker_manager = MarkerManager(server_ip, selected_room)
         self.layout.addWidget(self.marker_manager)
-
+        self.layout.addWidget(self.canvas)
         self.setLayout(self.layout)
 
         self.setup_timer()
@@ -320,6 +328,7 @@ class FlaskClientUI(QWidget):
             response.raise_for_status()
             data = response.json()
             x, y, z = data.get("x"), data.get("y"), data.get("z")
+            pose = (x,y,z)
             self.position_label.setText(f"Coordinates: X={x}, Y={y}, Z={z}")
             self.set_status_connected(True)
             
@@ -332,7 +341,7 @@ class FlaskClientUI(QWidget):
             data = response.json()
             if not  isinstance(data, str) :
                 arucoList = data.get("list")
-            update_pose_visual_and_stats(self.fig, self.ax,"3D Visualization",data, arucoList)
+            update_pose_visual_and_stats(self.fig, self.ax,"3D Visualization",pose=pose, markers = arucoList)
         except Exception:
             print("No Aruco List")
 
