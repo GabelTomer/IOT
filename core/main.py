@@ -19,13 +19,20 @@ import requests
 import math
 
 CAR_IP = "192.168.0.104"
+COMMAND_COOLDOWN = 0.5 # seconds 
+REACHED_THRESHOLD = 0.2 # meters
 
 def send_command(cmd):
+    if not hasattr(send_command, 'last_cmd_time'):
+        send_command.last_cmd_time = 0
+    if abs(time.time()-send_command.last_cmd_time) <= COMMAND_COOLDOWN:
+        return
     url = f"http://{CAR_IP}/{cmd}"
     try:
         response = requests.get(url, timeout=0.5)
         if response.status_code == 200:
             print(f"Sent command: {cmd}")
+            send_command.last_cmd_time = time.time()
         else:
             print(f"Failed to send command: {cmd}: {response.status_code}")
     except requests.exceptions.RequestException as e:
@@ -372,7 +379,8 @@ def main():
                     delta_y = current_pos['y'] - previous_pos['y']
                     if delta_x != 0 or delta_y != 0:
                         R, _ = cv2.Rodrigues(rvec)
-                        forward_vec = R[:, 2]
+                        R_cam2world = - R.T @ tvec
+                        forward_vec = R_cam2world @ np.array[0,1,1]
                         robot_heading = math.atan2(forward_vec[1], forward_vec[0]) #y,x
 
                 if distance < REACHED_THRESHOLD:
@@ -380,21 +388,22 @@ def main():
                 else:
                     angle_to_target = math.atan2(dy, dx)
                     heading_error = angle_to_target - robot_heading
-                    heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error)) # Normalize
+                    heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error)) # Normalize to get the shortets rotation 
+                    heading_error = math.degrees(heading_error)
 
                 # Simple steering logic
                 if distance < REACHED_THRESHOLD:
                     send_command("stop")
                     print("=== Reached Target ===")
                 else:
-                    if abs(heading_error) < math.radians(10):
+                    if abs(heading_error) < math.degrees(5):
                         send_command("forward")
-                    elif heading_error > math.radians(10):
+                    elif heading_error > math.radians(5):
                         send_command("leftShort")
-                        send_command("forward")
-                    elif heading_error < -math.radians(10):
+                        # send_command("forward")
+                    elif heading_error < -math.radians(5):
                         send_command("rightShort")
-                        send_command("forward")
+                        # send_command("forward")
 
                 previous_pos = current_pos
 
@@ -408,6 +417,7 @@ def main():
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 stop_event.set()  # <<<<<< Tell all threads to stop
                 break
+            time.sleep(0.02)
 
     cv2.destroyAllWindows()
 
