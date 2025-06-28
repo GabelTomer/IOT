@@ -99,15 +99,16 @@ def send_command(cmd):
         send_command.last_cmd = cmd
 
     if send_command.last_cmd == cmd and not "short" in cmd:
-        return
+        return None, None
     if abs(time.time()-send_command.last_cmd_time) <= COMMAND_COOLDOWN:
-        return
+        return None, None
     url = f"http://{CAR_IP}/{cmd}"
     try:
         response = requests.get(url, timeout=0.5)
         if response.status_code == 200:
             print(f"Sent command: {cmd}")
             send_command.last_cmd_time = time.time()
+            return cmd, send_command.last_cmd_time
         else:
             print(f"Failed to send command: {cmd}: {response.status_code}")
     except requests.exceptions.RequestException as e:
@@ -394,7 +395,8 @@ def main():
     REACHED_THRESHOLD = 0.2 # meters
     previous_pos = None
     robot_heading = 0.0
-
+    cmd = None
+    cmd_time = None
     # Main thread displays
     
     # === Kalman Filter Configuration ===
@@ -491,7 +493,7 @@ def main():
 
                             
                     if distance < REACHED_THRESHOLD:
-                        send_command("stop")
+                        cmd, cmd_time = send_command("stop")
                         flaskServer.target_position = None
                         print("=== Reached Target ===")
                     else:
@@ -502,11 +504,11 @@ def main():
 
                         # Simple steering logic
                         if abs(heading_error) < 5:
-                            send_command("forward")
+                            cmd, cmd_time = send_command("forward")
                         elif heading_error > 5:
-                            send_command("leftShort")
+                            cmd, cmd_time = send_command("leftShort")
                         elif heading_error < -5:
-                            send_command("rightShort")
+                            cmd, cmd_time = send_command("rightShort")
 
 
                     previous_pos = current_pos
@@ -515,7 +517,7 @@ def main():
             
             else:
                 # print("[ERROR] twoDArray or threeDArray is None!")
-                send_command("stop")
+                cmd, cmd_time = send_command("stop")
                 
             if _gui_available:
                 cv2.imshow("Detection", frame)
@@ -523,7 +525,7 @@ def main():
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 stop_event.set()  # <<<<<< Tell all threads to stop
                 break
-            time.sleep(0.02)
+            flaskServer.update_last_command((cmd,cmd_time))
 
     cv2.destroyAllWindows()
 

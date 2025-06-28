@@ -71,6 +71,10 @@ class _RobotControl extends State<RobotControl> {
   double pixelsPerMeterWidth = 0;
   double pixelsPerMeterHeight = 0;
   double robotHeading = 0; // Robot's heading in radians
+  String lastCommand = '';
+  String commandTime = '';
+
+
   Offset pixelToWorld(Offset pixel, Offset origin) {
     return Offset(
       (pixel.dx - origin.dx) / pixelsPerMeterWidth,
@@ -227,6 +231,35 @@ class _RobotControl extends State<RobotControl> {
           error = "Connection error";
           widget.logger.e("Connection error: $e");
           errorOccurred = true;
+        });
+      }
+    }
+  }
+
+  Future<void> fetchLastCommand() async {
+    try {
+      final response = await http.get(
+        Uri.parse('http://${widget.ipAddress}:5000/get_last_command'),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (mounted) {
+          setState(() {
+            lastCommand = data['command'] ?? 'Unknown';
+            commandTime = data['timestamp']; 
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            widget.logger.e("Command fetch error: ${response.statusCode}");
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          widget.logger.e("Command fetch failed: $e");
         });
       }
     }
@@ -751,6 +784,12 @@ class _RobotControl extends State<RobotControl> {
 
                   Text(
                     robotPosition,
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 10),
+
+                  Text(
+                    'Move robot $lastCommand', 
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 10),

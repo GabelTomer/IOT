@@ -17,6 +17,7 @@ class server:
             'y': 0.0,
             'z': 0.0
         }
+        self.last_command = {"command": None, "timestamp": None}
         if self.known_markers:
             self.rooms = list(self.known_markers.keys())
         else:
@@ -200,7 +201,19 @@ class server:
                 return jsonify({'status': 'success', 'target': self.target_position})
             return jsonify({'error': 'Invalid data'}), 400
 
-    
+        @self.app.route("/update_last_command", methods=["POST"])
+        def update_last_command(cmd):
+            command, cmd_time = cmd
+            if command:
+                self.last_command["command"] = command
+                self.last_command["timestamp"] = cmd_time
+                return jsonify({"status": "ok"}), 200
+            return jsonify({"status": "missing command"}), 400
+
+        @self.app.route("/get_last_command", methods=["GET"])
+        def get_last_command():
+            return jsonify(self.last_command)
+
     def updatePosition(self, x, y, z, heading=None):
         with self.lock:
             self.position['x'] = x
