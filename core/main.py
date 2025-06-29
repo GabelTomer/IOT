@@ -502,8 +502,11 @@ def main():
                         print("=== Reached Target ===")
                     else:
                         angle_to_target = math.atan2(dy, dx)
-                        heading_error = angle_to_target - robot_heading
-                        heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error)) # Normalize to get the shortets rotation 
+                        if dy < 0:
+                            heading_error = angle_to_target+math.pi
+                        else:
+                            heading_error = angle_to_target
+                        # heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error)) # Normalize to get the shortets rotation 
                         heading_error = math.degrees(heading_error)
 
                         # Simple steering logic
