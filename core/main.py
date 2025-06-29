@@ -20,8 +20,9 @@ POSE_UPDATE_THRESHOLD = 20000.0
 GENERATE_ARUCO_BOARD = False
 COMMUNICATION_METHOD = 'wifi'  # change to 'WiFi or i2c' when needed
 CAR_IP = "192.168.0.104"
-COMMAND_COOLDOWN = 0.5 # seconds 
-REACHED_THRESHOLD = 0.2 # meters
+COMMAND_COOLDOWN = 1 # seconds 
+ANGEL_THRESHOLD = 20 # degrees
+
 
 # --- GLOBAL Variables and Import specific Libraries for I2C ---
 if COMMUNICATION_METHOD == 'i2c':
@@ -391,8 +392,7 @@ def main():
         sys.exit(1)
     
     # for navigating:
-    LOOP_DELAY = 0.2 # seconds 
-    REACHED_THRESHOLD = 0.2 # meters
+    REACHED_THRESHOLD = 0.1 # meters
     previous_pos = None
     robot_heading = 0.0
     cmd = None
@@ -488,7 +488,7 @@ def main():
                     print(f"Target position: {target_pos}")
 
                     dx = target_pos['x'] - current_pos['x']
-                    dy = target_pos['y'] - current_pos['y']
+                    dy = target_pos['y'] - current_pos['z'] # z in current position is y (dist)
                     distance = math.hypot(dx, dy)
 
 
@@ -506,11 +506,11 @@ def main():
                         heading_error = math.degrees(heading_error)
 
                         # Simple steering logic
-                        if abs(heading_error) < 5:
+                        if abs(heading_error) < ANGEL_THRESHOLD:
                             cmd, cmd_time = send_command("forward")
-                        elif heading_error > 5:
+                        elif heading_error > ANGEL_THRESHOLD:
                             cmd, cmd_time = send_command("leftShort")
-                        elif heading_error < -5:
+                        elif heading_error < -ANGEL_THRESHOLD:
                             cmd, cmd_time = send_command("rightShort")
 
 
