@@ -201,11 +201,12 @@ class server:
             return jsonify({'error': 'Invalid data'}), 400
 
     
-    def updatePosition(self, x, y, z):
+    def updatePosition(self, x, y, z, heading=None):
         with self.lock:
             self.position['x'] = x
             self.position['y'] = y
             self.position['z'] = z
+            self.position['heading'] = heading if heading is not None else 0.0
     def getPos(self):
         with self.lock:
             return self.position

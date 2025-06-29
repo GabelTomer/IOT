@@ -70,6 +70,7 @@ class _RobotControl extends State<RobotControl> {
   final String robotIP = "192.168.1.104";
   double pixelsPerMeterWidth = 0;
   double pixelsPerMeterHeight = 0;
+  double robotHeading = 0; // Robot's heading in radians
   Offset pixelToWorld(Offset pixel, Offset origin) {
     return Offset(
       (pixel.dx - origin.dx) / pixelsPerMeterWidth,
@@ -204,6 +205,7 @@ class _RobotControl extends State<RobotControl> {
                 "X: ${data['x'].toStringAsFixed(2)}, Y: ${data['y'].toStringAsFixed(2)}, Z: ${data['z'].toStringAsFixed(2)}";
             robotX = data['x']; // Scale for display
             robotY = data['y']; // Scale for display
+            robotHeading = data['heading'] ?? 0.0; // Robot's heading in radians
             isConnected = true;
             errorOccurred = false;
           });
@@ -633,6 +635,13 @@ class _RobotControl extends State<RobotControl> {
                               origin: roomOrigin,
                               mapWidthMeters: roomWidth,
                               mapHeightMeters: roomHeight,
+                              robotPosition: worldToScreen(
+                              Offset(robotX, robotY),
+                              roomOrigin,
+                              pixelsPerMeterWidth,
+                              pixelsPerMeterHeight,
+                            ),
+                              robotHeading: robotHeading,
                              
                             ),
                           ),
@@ -802,6 +811,8 @@ class RoomPainterMap extends CustomPainter {
   final Offset origin; // in world meters
   final double mapWidthMeters;
   final double mapHeightMeters;
+  final Offset robotPosition;
+  final double robotHeading; // in radians
  // Adjust based on your scal
 
   RoomPainterMap({
@@ -809,7 +820,8 @@ class RoomPainterMap extends CustomPainter {
     required this.origin,
     required this.mapWidthMeters,
     required this.mapHeightMeters,
-
+    required this.robotPosition,
+    required this.robotHeading,
   });
 
   @override
@@ -838,6 +850,17 @@ class RoomPainterMap extends CustomPainter {
           ..strokeWidth = 2
           ..style = PaintingStyle.stroke;
     canvas.drawPath(path, border);
+    final heading = Path();
+    heading.moveTo(
+      robotPosition.dx,
+      robotPosition.dy,
+    );
+    path.lineTo(
+      robotPosition.dx + 20 * cos(robotHeading),
+      robotPosition.dy + 20 * sin(robotHeading),
+    );
+    path.close();
+    canvas.drawPath(heading, border);
   }
 
   @override

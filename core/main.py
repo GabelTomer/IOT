@@ -465,10 +465,13 @@ def main():
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
                 aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]))
                 pose = aggregator.get_average_pose()
+                # Camera facing forward = Z-axis; extract forward direction
+                forward_vector = R.T @ np.array([0, 0, 1])  # Z-axis in world coordinates
+                robot_heading = math.atan2(forward_vector[1], forward_vector[0])  # Y, X
                 if pose is not None:
                     x, y, z = pose
                     # Update server with smoothed average
-                    flaskServer.updatePosition(x, y, z)
+                    flaskServer.updatePosition(x, y, z, robot_heading)
                     #print Average Camera Position
                     print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
     
@@ -481,15 +484,10 @@ def main():
                     dy = target_pos['y'] - current_pos['y']
                     distance = math.hypot(dx, dy)
 
-                    if previous_pos:
-                        delta_x = current_pos['x'] - previous_pos['x']
-                        delta_y = current_pos['y'] - previous_pos['y']
-                        if delta_x != 0 or delta_y != 0:
-                            R, _ = cv2.Rodrigues(rvec)
-                            # Camera facing forward = Z-axis; extract forward direction
-                            forward_vector = R.T @ np.array([0, 0, 1])  # Z-axis in world coordinates
-                            robot_heading = math.atan2(forward_vector[1], forward_vector[0])  # Y, X
 
+
+
+                            
                     if distance < REACHED_THRESHOLD:
                         send_command("stop")
                         flaskServer.target_position = None
