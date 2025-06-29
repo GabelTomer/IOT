@@ -111,8 +111,10 @@ def send_command(cmd):
             return cmd, send_command.last_cmd_time
         else:
             print(f"Failed to send command: {cmd}: {response.status_code}")
+        return None, None
     except requests.exceptions.RequestException as e:
         print(f"Error sending {cmd}: {e}")
+        return None, None
 
 
 def runServer(flaskServer: server):

@@ -72,7 +72,7 @@ class _RobotControl extends State<RobotControl> {
   double pixelsPerMeterHeight = 0;
   double robotHeading = 0; // Robot's heading in radians
   String lastCommand = '';
-  String commandTime = '';
+  double commandTime = 0.0;
 
 
   Offset pixelToWorld(Offset pixel, Offset origin) {
@@ -105,6 +105,7 @@ class _RobotControl extends State<RobotControl> {
     await fetchKnownMarkers();
     timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       await fetchRobotPosition();
+      await fetchLastCommand();
     });
   }
 
@@ -245,7 +246,7 @@ class _RobotControl extends State<RobotControl> {
         final data = json.decode(response.body);
         if (mounted) {
           setState(() {
-            lastCommand = data['command'] ?? 'Unknown';
+            lastCommand = data['command'] ?? '';
             commandTime = data['timestamp']; 
           });
         }
@@ -788,11 +789,6 @@ class _RobotControl extends State<RobotControl> {
                   ),
                   const SizedBox(height: 10),
 
-                  Text(
-                    'Move robot $lastCommand', 
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 10),
 
                   Joystick(
                     mode: JoystickMode.all,
@@ -810,6 +806,12 @@ class _RobotControl extends State<RobotControl> {
                     robotPosition,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Last Command:  $lastCommand', 
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  
                 ],
               ],
             ),
