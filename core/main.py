@@ -80,16 +80,14 @@ def make_callback(addr):
     return callback
 
 def plot_updater_thread(aggregator, stop_event, flaskServer = None):
-    global aruco_ids,combined_aruco_ids
+    global combined_aruco_ids
     print("Started plot update thread")
     while not stop_event.is_set():
         # Update global set
         with aruco_ids_lock:
-            aruco_ids = list(combined_aruco_ids)
-
-        # Call your visual update with all seen markers
-        #update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_ids)
-        flaskServer.updateIds(aruco_ids)
+            # Call your visual update with all seen markers
+            #update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_ids)
+            flaskServer.updateIds(combined_aruco_ids)
         time.sleep(0.02)
 
 def send_command(cmd):

@@ -161,7 +161,7 @@ class server:
         @self.app.route('/get_aruco_list')
         def show_visualization():
             dataToSend = {}
-            dataToSend["list"] = self.getArucoList()
+            dataToSend = self.getArucoList()
             if dataToSend is None:
                 dataToSend = "GOT NONE"
             return jsonify(dataToSend)
