@@ -410,7 +410,7 @@ def main():
                 break
             
             corners, twoDArray, threeDArray, threeDCenters, frame, aruco_markers_detected = detector.aruco_detect(frame=frame)
-                        
+            forward_vector = None
             if twoDArray is not None and threeDArray is not None:
                 if twoDArray.shape[0] < 3:
                     if len(twoDArray) == 2 and len(threeDArray) == 2:
@@ -424,6 +424,7 @@ def main():
                             kalman.correct(measured)
                             predicted = kalman.predict()
                             filtered_pos = predicted[:3]
+                            forward_vector = R.T @ np.array([0, 0, 1])
                             
                     elif len(twoDArray) == 1:
                         rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
@@ -435,7 +436,7 @@ def main():
                         t_cam2marker = -R_marker2cam.T @ t_marker2cam
                         center_avg = np.mean(threeDCenters, axis=0).reshape(3, 1)
                         t_cam2world = R_cam2marker @ t_cam2marker + center_avg
-
+                        forward_vector = R_cam2marker @ np.array([0, 0, 1])  # Z-axis in world coordinates
 
                         # Compute average position with Kalman Filter
                         measured = t_cam2world.reshape(3, 1).astype(np.float32)
@@ -455,6 +456,7 @@ def main():
                         kalman.correct(measured)
                         predicted = kalman.predict()
                         filtered_pos = predicted[:3]
+                        forward_vector = R.T @ np.array([0, 0, 1])  # Z-axis in world coordinates
                 
                 aruco_markers_detected = np.array(aruco_markers_detected).flatten().tolist() if aruco_markers_detected is not None else []
                 if not aruco_markers_detected:
@@ -466,8 +468,8 @@ def main():
                 aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]))
                 pose = aggregator.get_average_pose()
                 # Camera facing forward = Z-axis; extract forward direction
-                forward_vector = R.T @ np.array([0, 0, 1])  # Z-axis in world coordinates
-                robot_heading = math.atan2(forward_vector[1], forward_vector[0])  # Y, X
+                if forward_vector is not None:
+                    robot_heading = math.atan2(forward_vector[1], forward_vector[0])  # Y, X
                 if pose is not None:
                     x, y, z = pose
                     # Update server with smoothed average

@@ -477,7 +477,7 @@ class _RobotControl extends State<RobotControl> {
 
     Future<void> sendTargetPosition(Offset target) async {
       final url =
-          'http://${widget.ipAddress}:5000/update_position'; // replace with your endpoint
+          'http://${widget.ipAddress}:5000/set_target'; // replace with your endpoint
       final response = await http.post(
         Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
