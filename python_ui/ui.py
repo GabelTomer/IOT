@@ -203,13 +203,13 @@ class MarkerManager(QWidget):
             return
         marker_id = marker_id.strip()
 
-        x, ok_x = QInputDialog.getDouble(self, "Add Marker", "X coordinate:")
+        x, ok_x = QInputDialog.getDouble(self, "Add Marker", "X coordinate:",decimals=4)
         if not ok_x:
             return
-        y, ok_y = QInputDialog.getDouble(self, "Add Marker", "Y coordinate:")
+        y, ok_y = QInputDialog.getDouble(self, "Add Marker", "Y coordinate:",decimals=4)
         if not ok_y:
             return
-        z, ok_z = QInputDialog.getDouble(self, "Add Marker", "Z coordinate:")
+        z, ok_z = QInputDialog.getDouble(self, "Add Marker", "Z coordinate:",decimals=4)
         if not ok_z:
             return
 
@@ -248,15 +248,15 @@ class MarkerManager(QWidget):
         marker_id = self.marker_table.item(selected, 0).text()
 
         x, ok_x = QInputDialog.getDouble(self, "Update Marker", "New X coordinate:",
-                                         float(self.marker_table.item(selected, 1).text()))
+                                         float(self.marker_table.item(selected, 1).text()),decimals=4)
         if not ok_x:
             return
         y, ok_y = QInputDialog.getDouble(self, "Update Marker", "New Y coordinate:",
-                                         float(self.marker_table.item(selected, 2).text()))
+                                         float(self.marker_table.item(selected, 2).text()),decimals=4)
         if not ok_y:
             return
         z, ok_z = QInputDialog.getDouble(self, "Update Marker", "New Z coordinate:",
-                                         float(self.marker_table.item(selected, 3).text()))
+                                         float(self.marker_table.item(selected, 3).text()),decimals=4)
         if not ok_z:
             return
 
@@ -337,7 +337,7 @@ class FlaskClientUI(QWidget):
             response = requests.get(f"{self.server_url}/get_position", timeout=2)
             response.raise_for_status()
             data = response.json()
-            x, y, z = data.get("x"), data.get("y"), data.get("z")
+            x, z, y = data.get("x"), data.get("y"), data.get("z")
             pose = (x,y,z)
             self.position_label.setText(f"Coordinates: X={x}, Y={y}, Z={z}")
             self.set_status_connected(True)

@@ -209,7 +209,7 @@ class _RobotControl extends State<RobotControl> {
             robotPosition =
                 "X: ${data['x'].toStringAsFixed(2)}, Y: ${data['y'].toStringAsFixed(2)}, Z: ${data['z'].toStringAsFixed(2)}";
             robotX = data['x']; // Scale for display
-            robotY = data['y']; // Scale for display
+            robotY = data['z']; // Scale for display
             robotHeading = data['heading'] ?? 0.0; // Robot's heading in radians
             isConnected = true;
             errorOccurred = false;
