@@ -12,10 +12,12 @@ class server:
         self.known_markers_path = known_markers_path
         self.lock = threading.Lock()
         self.port = port
+        self.roomChanged = False
         self.position = {
             'x': 0.0,
             'y': 0.0,
-            'z': 0.0
+            'z': 0.0,
+            'heading' : 0.0
         }
         self.last_command = {"command": None, "timestamp": None}
         if self.known_markers:
@@ -72,6 +74,7 @@ class server:
             data = request.get_json()
             room = data.get('room')
             if room in self.known_markers:
+                self.roomChanged = True
                 self.detector.update_known_markers(room=room)
                 return jsonify({"status": "success", "room": room})
             else:

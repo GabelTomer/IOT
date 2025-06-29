@@ -256,8 +256,9 @@ def wifi_processor_dequeue(pose_queue, aggregator, flaskServer, stop_event):
                 x, y, z = pose
                 flaskServer.updatePosition(x, y, z)
                 with aruco_ids_lock:
-                    for marker in aruco_list:
-                        combined_aruco_ids[str(marker)] =  (combined_aruco_ids[str(marker)] + 1) % 2
+                    if combined_aruco_ids:
+                        for marker in aruco_list:
+                            combined_aruco_ids[str(marker)] =  (combined_aruco_ids[str(marker)] + 1) % 2
 
 def receive_from_clients(method, aggregator, flaskServer, stop_event):
     if method == 'wifi':
@@ -366,8 +367,7 @@ def main():
             print("Retrying calibration. Got error:", mean_error)
         
     detector = Detection(known_markers_path="core/utils/known_markers.json")
-    for key in detector.known_markers.keys():
-        combined_aruco_ids[key] = 0
+
     known_markers = detector.known_markers
     flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector)
     aggregator = PoseAggregator()
@@ -406,7 +406,10 @@ def main():
     # Main thread displays
     while True:
 
-
+            if flaskServer.roomChanged:
+                flaskServer.roomChanged = False
+                for key in detector.known_markers.keys():
+                    combined_aruco_ids[key] = 0
             ret, frame = video.read()
             if not ret:
                 break
@@ -461,7 +464,7 @@ def main():
                         forward_vector = R.T @ np.array([0, 0, 1])  # Z-axis in world coordinates
                 
                 aruco_markers_detected = np.array(aruco_markers_detected).flatten().tolist() if aruco_markers_detected is not None else []
-                if not aruco_markers_detected:
+                if aruco_markers_detected and combined_aruco_ids:
                     with aruco_ids_lock:
                         for marker in aruco_markers_detected:
                             combined_aruco_ids[marker] =  (combined_aruco_ids[marker] + 1) % 2
