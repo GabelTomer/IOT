@@ -525,7 +525,7 @@ def main():
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 stop_event.set()  # <<<<<< Tell all threads to stop
                 break
-            flaskServer.update_last_command((cmd,cmd_time))
+            flaskServer.update_last_command(cmd,cmd_time)
 
     cv2.destroyAllWindows()
 

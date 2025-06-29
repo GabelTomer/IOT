@@ -208,8 +208,8 @@ class server:
         def get_last_command():
             return jsonify(self.last_command)
 
-    def update_last_command(self, cmd):
-            command, cmd_time = cmd
+    def update_last_command(self, cmd, cmd_time):
+            command = cmd
             if command:
                 self.last_command["command"] = command
                 self.last_command["timestamp"] = cmd_time
