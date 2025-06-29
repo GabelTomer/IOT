@@ -409,7 +409,7 @@ def main():
             if flaskServer.roomChanged:
                 flaskServer.roomChanged = False
                 for key in detector.known_markers.keys():
-                    combined_aruco_ids[key] = 0
+                    combined_aruco_ids[str(key)] = 0
             ret, frame = video.read()
             if not ret:
                 break
@@ -467,7 +467,7 @@ def main():
                 if aruco_markers_detected and combined_aruco_ids:
                     with aruco_ids_lock:
                         for marker in aruco_markers_detected:
-                            combined_aruco_ids[marker] =  (combined_aruco_ids[marker] + 1) % 2
+                            combined_aruco_ids[str(marker)] =  (combined_aruco_ids[str(marker)] + 1) % 2
                         
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
                 aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]))
