@@ -635,13 +635,13 @@ class _RobotControl extends State<RobotControl> {
                               origin: roomOrigin,
                               mapWidthMeters: roomWidth,
                               mapHeightMeters: roomHeight,
-                              robotPosition: worldToScreen(
-                              Offset(robotX, robotY),
-                              roomOrigin,
-                              pixelsPerMeterWidth,
-                              pixelsPerMeterHeight,
-                            ),
-                              robotHeading: robotHeading,
+                              //robotPosition: worldToScreen(
+                              //Offset(robotX, robotY),
+                              //roomOrigin,
+                              //pixelsPerMeterWidth,
+                              //pixelsPerMeterHeight,
+                            //),
+                              //robotHeading: robotHeading,
                              
                             ),
                           ),
@@ -707,10 +707,14 @@ class _RobotControl extends State<RobotControl> {
                               pixelsPerMeterHeight,
                             ).dy -
                             robotIconSize,
-                        child: Icon(
-                          Icons.directions_car_rounded,
+                        child: Transform.rotate(
+                          angle: robotHeading,
+                          child: Icon(
+                          Icons.navigation_rounded,
                           size: robotIconSize.toDouble(),
                           color: Colors.blue,
+                          ),
+                           // Use the robot's heading
                         ),
                       ),
                       // destination position
@@ -811,8 +815,8 @@ class RoomPainterMap extends CustomPainter {
   final Offset origin; // in world meters
   final double mapWidthMeters;
   final double mapHeightMeters;
-  final Offset robotPosition;
-  final double robotHeading; // in radians
+  //final Offset robotPosition;
+  //final double robotHeading; // in radians
  // Adjust based on your scal
 
   RoomPainterMap({
@@ -820,8 +824,8 @@ class RoomPainterMap extends CustomPainter {
     required this.origin,
     required this.mapWidthMeters,
     required this.mapHeightMeters,
-    required this.robotPosition,
-    required this.robotHeading,
+    //required this.robotPosition,
+    //required this.robotHeading,
   });
 
   @override
@@ -832,7 +836,7 @@ class RoomPainterMap extends CustomPainter {
           ..style = PaintingStyle.fill;
 
     if (boundaryPoints.length < 3) return;
-
+    //final double robotIconSize = 30.0; // Size of the robot icon
     final path = Path();
     path.moveTo(boundaryPoints[0].dx, boundaryPoints[0].dy);
 
@@ -850,17 +854,27 @@ class RoomPainterMap extends CustomPainter {
           ..strokeWidth = 2
           ..style = PaintingStyle.stroke;
     canvas.drawPath(path, border);
-    final heading = Path();
-    heading.moveTo(
-      robotPosition.dx,
-      robotPosition.dy,
-    );
-    path.lineTo(
-      robotPosition.dx + 20 * cos(robotHeading),
-      robotPosition.dy + 20 * sin(robotHeading),
-    );
-    path.close();
-    canvas.drawPath(heading, border);
+  //   final headingColor =
+  //       Paint()
+  //         ..color = const Color.fromARGB(255, 37, 247, 104)
+  //         ..strokeWidth = 2
+  //         ..style = PaintingStyle.stroke;
+  //   final heading = Path();
+  //  final pos = Offset(
+  //     robotPosition.dx+robotIconSize/2,
+  //     robotPosition.dy-robotIconSize/2,
+  //   );
+  //   final theta = robotHeading - pi / 2; // Adjust heading to point upwards
+  //   heading.moveTo(
+  //     pos.dx,
+  //     pos.dy,
+  //   );
+  //   heading.lineTo(
+  //     pos.dx + 30 * cos(theta),
+  //     pos.dy + 30 * sin(theta),
+  //   );
+  //   heading.close();
+  //   canvas.drawPath(heading, headingColor);
   }
 
   @override
