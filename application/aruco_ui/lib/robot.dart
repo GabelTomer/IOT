@@ -66,7 +66,7 @@ class _RobotControl extends State<RobotControl> {
   List<Offset> roomBoundary = [];
   Offset roomOrigin = Offset.zero;
   // Adjust based on your robot's IP
-  final String robotIP = "192.168.1.104";
+  final String robotIP = "192.168.0.104";
   double pixelsPerMeterWidth = 0;
   double pixelsPerMeterHeight = 0;
   Offset pixelToWorld(Offset pixel, Offset origin) {
@@ -474,7 +474,7 @@ class _RobotControl extends State<RobotControl> {
 
     Future<void> sendTargetPosition(Offset target) async {
       final url =
-          'http://${widget.ipAddress}:5000/update_position'; // replace with your endpoint
+          'http://${widget.ipAddress}:5000/set_target'; // replace with your endpoint
       final response = await http.post(
         Uri.parse(url),
         headers: {'Content-Type': 'application/json'},

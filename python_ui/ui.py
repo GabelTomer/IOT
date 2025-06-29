@@ -11,6 +11,7 @@ import pandas as pd
 import os
 import matplotlib.patheffects as pe
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+
 def is_valid_ip(ip: str) -> bool:
     import re
     pattern = re.compile(
@@ -65,10 +66,11 @@ MAX_LOG_LEN = 500
 
 poses_log = []
 known_markers = {}
+last_markers = None
 def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = 'b', marker = 'o'):
-    global known_markers, poses_log
+    global known_markers, poses_log, last_markers
     x, y, z = pose
-
+    valid_markers = []
     # Keep history for statistics, but don't plot it all
     if len(poses_log) > MAX_LOG_LEN:
         poses_log.pop(0)
@@ -76,9 +78,9 @@ def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = '
 
     ax.cla()
     ax.set_title(title)
-    ax.set_xlim(-1, 1)
-    ax.set_ylim(-1, 1)
-    ax.set_zlim(-2, 2)
+    ax.set_xlim(-(x + (x * 0.1)), (x + (x * 0.1)))
+    ax.set_ylim(-(y + (y * 0.1)), (y + (y * 0.1)))
+    ax.set_zlim(-(z + (z * 0.1)), (z + (z * 0.1)))
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
@@ -88,7 +90,15 @@ def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = '
 
     # Draw lines from each detected ArUco marker center to the current pose
     if markers is not None:
-        for marker in markers:
+        if last_markers is not None:
+            for key,value in markers.items():
+                if (last_markers[key] -value) % 2 == 1:
+                    valid_markers.append(key)
+        else:
+            valid_markers = [key for key in markers.keys()]
+    
+        last_markers = markers
+        for marker in valid_markers:
             if marker == "origin" or marker == "boundry" or marker == "width" or marker == "height":
                     # Skip origin and boundary markers
                     continue

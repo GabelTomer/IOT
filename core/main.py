@@ -38,7 +38,7 @@ elif COMMUNICATION_METHOD == "wifi":
 # --- GLOBAL Variables and Intialization of 3D Visulaization ---
 plot_lock = threading.Lock()
 
-combined_aruco_ids = set()
+combined_aruco_ids = {}
 aruco_ids = []
 aruco_ids_lock = threading.Lock()
 known_markers = {}
@@ -228,7 +228,8 @@ def wifi_processor_dequeue(pose_queue, aggregator, flaskServer, stop_event):
                 x, y, z = pose
                 flaskServer.updatePosition(x, y, z)
                 with aruco_ids_lock:
-                    combined_aruco_ids.update(aruco_list)
+                    for marker in aruco_list:
+                        combined_aruco_ids[str(marker)] =  (combined_aruco_ids[str(marker)] + 1) % 2
 
 def receive_from_clients(method, aggregator, flaskServer, stop_event):
     if method == 'wifi':
@@ -339,6 +340,8 @@ def main():
             print("Retrying calibration. Got error:", mean_error)
         
     detector = Detection(known_markers_path="core/utils/known_markers.json")
+    for key in detector.known_markers.keys():
+        combined_aruco_ids[key] = 0
     known_markers = detector.known_markers
     flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector)
     aggregator = PoseAggregator()
@@ -425,9 +428,11 @@ def main():
                         filtered_pos = predicted[:3]
                 
                 aruco_markers_detected = np.array(aruco_markers_detected).flatten().tolist() if aruco_markers_detected is not None else []
-                with aruco_ids_lock:
-                    combined_aruco_ids.update(aruco_markers_detected)
-                    
+                if not aruco_markers_detected:
+                    with aruco_ids_lock:
+                        for marker in aruco_markers_detected:
+                            combined_aruco_ids[marker] =  (combined_aruco_ids[marker] + 1) % 2
+                        
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
                 aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]))
                 pose = aggregator.get_average_pose()
