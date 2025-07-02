@@ -423,8 +423,11 @@ def main():
                     # if success:
                     #     R, _ = cv2.Rodrigues(rvec)
                     #     measured = (-R.T @ tvec).astype(np.float32).reshape(3, 1)
-                    success, rvec, tvec, inliners = cv2.solvePnPRansac(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs)
-                    if success and inliners is not None and len(inliners) >= 4:
+                    success, rvec, tvec, inliers = cv2.solvePnPRansac(obj_pts, 
+                                                     img_pts, 
+                                                     camera.camera_matrix, 
+                                                     camera.dist_coeffs)
+                    if success and inliers is not None and len(inliers) >= 4:
                         R, _ = cv2.Rodrigues(rvec)
                         measured = (-R.T @ tvec).astype(np.float32).reshape(3, 1)
 
