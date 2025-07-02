@@ -17,7 +17,7 @@ import requests
 import math
 # --- General GLOBAL Variables --- 
 POSE_UPDATE_THRESHOLD = 20000.0
-GENERATE_ARUCO_BOARD = True
+GENERATE_ARUCO_BOARD = False
 COMMUNICATION_METHOD = 'wifi'  # change to 'WiFi or i2c' when needed
 CAR_IP = "192.168.0.104"
 COMMAND_COOLDOWN = 1 # seconds 

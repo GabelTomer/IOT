@@ -13,6 +13,7 @@ class server:
         self.lock = threading.Lock()
         self.port = port
         self.roomChanged = False
+        self.arucoList = None
         self.position = {
             'x': 0.0,
             'y': 0.0,
