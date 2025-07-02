@@ -45,3 +45,4 @@ service/service_installer.sh
 /core/server/__pycache__/
 /core/__pycache__/
 /core/utils/__pycache__/
+pose_statistics_log.csv
