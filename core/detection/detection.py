@@ -91,7 +91,7 @@ class Detection:
 
                 if str(markerID) in self.known_markers:
                     aruco_markers.append(markerID)
-                    marker_center = self.known_markers[markerID_str]
+                    marker_center = self.known_markers[str(markerID)]
 
                     all_corners.append(markerCorner)
                     all_found_2d.append(center_2d)
