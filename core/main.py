@@ -17,7 +17,7 @@ import requests
 import math
 # --- General GLOBAL Variables --- 
 POSE_UPDATE_THRESHOLD = 20000.0
-GENERATE_ARUCO_BOARD = False
+GENERATE_ARUCO_BOARD = True
 COMMUNICATION_METHOD = 'wifi'  # change to 'WiFi or i2c' when needed
 CAR_IP = "192.168.0.104"
 COMMAND_COOLDOWN = 1 # seconds 
@@ -41,17 +41,14 @@ if COMMUNICATION_METHOD == 'i2c':
 elif COMMUNICATION_METHOD == "wifi":
     import socket
     import queue
+    PORT = 6002
 
 
 # --- GLOBAL Variables and Intialization of 3D Visulaization ---
-plot_lock = threading.Lock()
-
 combined_aruco_ids = {}
-aruco_ids = []
 aruco_ids_lock = threading.Lock()
-known_markers = {}
-
 _gui_available = None
+aruco_list_queue = queue.Queue(maxsize = 5000)
 
 def is_gui_available():
     """
@@ -81,16 +78,23 @@ def make_callback(addr):
     return callback
 
 def plot_updater_thread(aggregator, stop_event, flaskServer = None):
-    global combined_aruco_ids
+    global combined_aruco_ids, aruco_list_queue
     print("Started plot update thread")
     while not stop_event.is_set():
         # Update global set
         if combined_aruco_ids:
             with aruco_ids_lock:
+                try:
+                    aruco_list = aruco_list_queue.get_nowait()
+                    for marker in aruco_list:
+                            combined_aruco_ids[str(marker)] =  (combined_aruco_ids[str(marker)] + 1) % 2
+                except queue.Empty:
+                    pass
                 # Call your visual update with all seen markers
                 #update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_ids)
                 flaskServer.updateIds(combined_aruco_ids)
-            time.sleep(0.02)
+                
+        time.sleep(0.02)
 
 def send_command(cmd):
     if not hasattr(send_command, 'last_cmd_time'):
@@ -116,7 +120,6 @@ def send_command(cmd):
         print(f"Error sending {cmd}: {e}")
         return None, None
 
-
 def runServer(flaskServer: server):
     
     flaskServer.setup_routes()
@@ -137,7 +140,7 @@ def generate_aruco_board():
     min_spacing_m = 0.03  # relaxed spacing
 
     canvas = 255 * np.ones((a4_height_px, a4_width_px), dtype=np.uint8)
-    marker_ids = [1, 2, 3, 4, 5]
+    marker_ids = [26,27,28,29,30]
 
     # Safe placement function
     def generate_safe_positions(num_markers, marker_size_m, min_spacing_m):
@@ -196,28 +199,6 @@ def generate_aruco_board():
         x, y, z = positions_m[marker_id]
         print(f"ID {marker_id}: x={x:.3f}, y={y:.3f}, z={z:.3f}")
 
-def wifi_listener_enqueue(pose_queue, port, stop_event):
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('', port))
-    print(f"[UDP] Listening on port {port}")
-
-    while not stop_event.is_set():
-        try:
-            data, addr = sock.recvfrom(512)
-            # Unpack header + pose + timestamp + aruco_list
-            if data[0:3] == b'\xFA\xF3\x20':
-                x, y, z , timestamp = struct.unpack('<3fQ', data[3:23])
-
-                # Get ArUco list
-                aruco_list = list(data[23:])  # remaining bytes are ArUco IDs
-
-                # Push to queue
-                pose_queue.put((x, y, z, timestamp, aruco_list))
-
-        except Exception as e:
-            print(f"[UDP Listener] Error: {e}")
-
 def resource_path(relative_path):
     import sys, os
     if hasattr(sys, '_MEIPASS'):
@@ -247,27 +228,37 @@ def kalman_filter_config():
     kalman.statePost = np.zeros((6, 1), dtype=np.float32)
     return kalman
 
-def wifi_processor_dequeue(pose_queue, aggregator, flaskServer, stop_event):
+def wifi_listener_and_processor(aggregator, flaskServer, stop_event, port = 6002):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(('', port))
+    print(f"[UDP] Listening and processing on port {port}")
+
     while not stop_event.is_set():
-        if not pose_queue.empty():
-            x, y, z, timestamp, aruco_list = pose_queue.get()
-            aggregator.update_pose((x, y, z))
-            pose = aggregator.get_average_pose()
-            time_now = time.time_ns() // 1000
-            if pose and  0 <= (time_now - timestamp) <= POSE_UPDATE_THRESHOLD:
-                x, y, z = pose
-                flaskServer.updatePosition(x, y, z)
-                with aruco_ids_lock:
-                    if combined_aruco_ids:
+        try:
+            data, addr = sock.recvfrom(512)
+            if data[0:3] == b'\xFA\xF3\x20':
+                x, y, z , timestamp = struct.unpack('<3fQ', data[3:23])
+                aruco_list = list(data[23:])
+
+                pose = (x, y, z)
+                aggregator.update_pose(pose)
+                avg_pose = aggregator.get_average_pose()
+                time_now = time.time_ns() // 1000
+
+                if avg_pose and 0 <= (time_now - timestamp) <= POSE_UPDATE_THRESHOLD:
+                    x, y, z = avg_pose
+                    flaskServer.updatePosition(x, y, z)
+                    with aruco_ids_lock:
                         for marker in aruco_list:
-                            combined_aruco_ids[str(marker)] =  (combined_aruco_ids[str(marker)] + 1) % 2
+                            combined_aruco_ids[str(marker)] = (combined_aruco_ids[str(marker)] + 1) % 5
+        
+        except Exception as e:
+            print(f"[UDP] Error: {e}")
 
 def receive_from_clients(method, aggregator, flaskServer, stop_event):
     if method == 'wifi':
-        pose_queue = queue.Queue(maxsize = 5000)
-        port = 6002
-        threading.Thread(target = wifi_listener_enqueue, args=(pose_queue, port, stop_event), daemon=True).start()
-        threading.Thread(target = wifi_processor_dequeue, args=(pose_queue, aggregator, flaskServer, stop_event), daemon=True).start()
+        threading.Thread(target=wifi_listener_and_processor, args=(aggregator, flaskServer, stop_event, PORT), daemon=True).start()
+    
     elif method == 'i2c':
         # Use a single I2C bus for all slave addresses
         i2c_bus = {0x08: smbus2.SMBus(1), 0x09: smbus2.SMBus(3)} 
@@ -466,9 +457,10 @@ def main():
                 
                 aruco_markers_detected = np.array(aruco_markers_detected).flatten().tolist() if aruco_markers_detected is not None else []
                 if aruco_markers_detected and combined_aruco_ids:
-                    with aruco_ids_lock:
-                        for marker in aruco_markers_detected:
-                            combined_aruco_ids[str(marker)] =  (combined_aruco_ids[str(marker)] + 1) % 2
+                    try:
+                        aruco_list_queue.put_nowait(aruco_markers_detected)
+                    except queue.Full:
+                        pass  # skip frame if too many pending updates
                         
                 cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
                 aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]))
