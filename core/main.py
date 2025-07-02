@@ -448,14 +448,22 @@ def main():
                         R, _ = cv2.Rodrigues(rvec)
                         measured = (-R.T @ tvec).astype(np.float32).reshape(3, 1)
 
-                elif num_points <= 2:
-                    estimate = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
-                    if estimate is not None and len(estimate[0]) > 0 and len(estimate[1]) > 0:
-                        rvecs, tvecs, _ = estimate
-                        rvec = rvecs[0]
-                        tvec = tvecs[0]
+                elif num_points == 2:
+                    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
+                    positions = []
+                    for rvec, tvec in zip(rvecs, tvecs):
                         R, _ = cv2.Rodrigues(rvec)
-                        measured = (-R.T @ tvec.T).astype(np.float32).reshape(3, 1)
+                        pos = -R.T @ tvec.T
+                        positions.append(pos)
+                        
+                    measured = np.mean(positions, axis = 0).astype(np.float32).reshape(3, 1)
+                    
+                elif num_points == 1:
+                    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
+                    rvec = rvecs[0]
+                    tvec = tvecs[0]
+                    R, _ = cv2.Rodrigues(rvec)
+                    measured = (-R.T @ tvec.T).astype(np.float32).reshape(3, 1)
 
             # Apply Kalman filter only if measured is valid
             if measured is not None and not np.any(np.isnan(measured)):
