@@ -57,10 +57,10 @@ class Detection:
                     continue
                 if isinstance(values, dict):
                     # Extract x, y, z from dict
-                    known_markers[str(marker)] = np.array([values["x"], values["y"], values["z"]], dtype=np.float32)
+                    known_markers[str(marker)] = np.array([values["x"], values["y"], values["z"]], dtype=np.double)
                 elif isinstance(values, list):
                     # Directly use the list
-                    known_markers[str(marker)] = np.array(values, dtype=np.float32)
+                    known_markers[str(marker)] = np.array(values, dtype=np.double)
                 else:
                     raise ValueError(f"[ERROR] Invalid marker format for marker {marker}: {values}")
         return known_markers
@@ -84,7 +84,7 @@ class Detection:
                 corner_points = markerCorner[0]
                 cX = np.mean(corner_points[:, 0])
                 cY = np.mean(corner_points[:, 1])
-                center_2d = np.array([cX, cY], dtype=np.float32)
+                center_2d = np.array([cX, cY], dtype=np.double)
                 cv.polylines(frame, [np.int32(corner_points)], True, (0, 255, 0), 2)
                 cv.putText(frame, f"{markerID}", (int(cX) - 15, int(cY) - 15),
                            cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
@@ -97,7 +97,7 @@ class Detection:
                     all_found_2d.append(center_2d)
                     all_centers_3d.append(marker_center)
 
-            return all_corners, np.array(all_found_2d, dtype=np.float32), np.array(all_centers_3d, dtype=np.float32), frame, aruco_markers
+            return all_corners, np.array(all_found_2d, dtype=np.double), np.array(all_centers_3d, dtype=np.double), frame, aruco_markers
         else:
             return None, None, None, frame, None
 
