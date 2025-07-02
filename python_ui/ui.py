@@ -63,7 +63,7 @@ def notifyRoomSelection(server_ip, room):
         QMessageBox.critical(None, "Notification Error", f"Could not notify room selection:\n{e}")
 
 MAX_LOG_LEN = 500
-
+RANGE = 0.5  # adjust this for how much space around the center you want
 poses_log = []
 known_markers = {}
 last_markers = None
@@ -78,9 +78,9 @@ def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = '
 
     ax.cla()
     ax.set_title(title)
-    ax.set_xlim(-(x + (x * 0.1)), (x + (x * 0.1)))
-    ax.set_ylim(-(y + (y * 0.1)), (y + (y * 0.1)))
-    ax.set_zlim(-(z + (z * 0.1)), (z + (z * 0.1)))
+    ax.set_xlim(x - RANGE, x + RANGE)
+    ax.set_ylim(y - RANGE, y + RANGE)
+    ax.set_zlim(z - RANGE, z + RANGE)
     ax.set_xlabel("X")
     ax.set_ylabel("Y")
     ax.set_zlabel("Z")
