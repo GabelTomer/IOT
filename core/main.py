@@ -87,7 +87,7 @@ def plot_updater_thread(aggregator, stop_event, flaskServer = None):
                 try:
                     aruco_list = aruco_list_queue.get_nowait()
                     for marker in aruco_list:
-                            combined_aruco_ids[str(marker)] =  (combined_aruco_ids[str(marker)] + 1) % 2
+                            combined_aruco_ids[str(marker)] =  (combined_aruco_ids[str(marker)] + 1) % 5
                 except queue.Empty:
                     pass
                 # Call your visual update with all seen markers
@@ -394,7 +394,8 @@ def main():
     # === Kalman Filter Configuration ===
     kalman = kalman_filter_config()
     filtered_pos = 0
-    
+    last_rvec = None
+    last_tvec = None
     # Main thread displays
     while True:
 
@@ -402,6 +403,7 @@ def main():
                 flaskServer.roomChanged = False
                 for key in detector.known_markers.keys():
                     combined_aruco_ids[str(key)] = 0
+            
             ret, frame = video.read()
             if not ret:
                 break
@@ -425,36 +427,35 @@ def main():
                     #     measured = (-R.T @ tvec).astype(np.float32).reshape(3, 1)
                     success, rvec, tvec, inliners = cv2.solvePnPRansac(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs)
                     if success and inliners is not None and len(inliners) >= 4:
+                        last_rvec = rvec
+                        last_tvec = tvec
                         R, _ = cv2.Rodrigues(rvec)
                         measured = (-R.T @ tvec).astype(np.float32).reshape(3, 1)
 
                 elif num_points == 3:
                     flags = cv2.SOLVEPNP_ITERATIVE
-                    guess_rvec = np.zeros((3, 1), dtype=np.float32)
-                    guess_tvec = np.zeros((3, 1), dtype=np.float32)
+                    if last_tvec is None and last_rvec is None:
+                        guess_rvec = np.zeros((3, 1), dtype=np.float32)
+                        guess_tvec = np.zeros((3, 1), dtype=np.float32)
+                    else:
+                        guess_rvec = last_rvec
+                        guess_tvec = last_tvec
+                        
                     success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs,
                                                     rvec=guess_rvec, tvec=guess_tvec,
                                                     useExtrinsicGuess=True, flags=flags)
                     if success:
                         R, _ = cv2.Rodrigues(rvec)
-                      
                         measured = (-R.T @ tvec).astype(np.float32).reshape(3, 1)
 
-                elif num_points == 2:
-                    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
-                    positions = []
-                    for rvec, tvec in zip(rvecs, tvecs):
+                elif num_points <= 2:
+                    estimate = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
+                    if estimate is not None and len(estimate[0]) > 0 and len(estimate[1]) > 0:
+                        rvecs, tvecs, _ = estimate
+                        rvec = rvecs[0]
+                        tvec = tvecs[0]
                         R, _ = cv2.Rodrigues(rvec)
-                        pos = -R.T @ tvec.T
-                        positions.append(pos)
-                    measured = np.mean(positions, axis=0).astype(np.float32).reshape(3, 1)
-
-                elif num_points == 1:
-                    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
-                    rvec = rvecs[0]
-                    tvec = tvecs[0]
-                    R, _ = cv2.Rodrigues(rvec)
-                    measured = (-R.T @ tvec.T).astype(np.float32).reshape(3, 1)
+                        measured = (-R.T @ tvec.T).astype(np.float32).reshape(3, 1)
 
             # Apply Kalman filter only if measured is valid
             if measured is not None and not np.any(np.isnan(measured)):
@@ -516,8 +517,6 @@ def main():
 
 
                     previous_pos = current_pos
-
-                cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
             
             else:
                 # print("[ERROR] twoDArray or threeDArray is None!")

@@ -92,7 +92,7 @@ def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = '
     if markers is not None:
         if last_markers is not None:
             for key,value in markers.items():
-                if (last_markers[key] -value) % 2 == 1:
+                if (last_markers[key] - value) % 5 != 0:
                     valid_markers.append(key)
         else:
             valid_markers = [key for key in markers.keys()]
