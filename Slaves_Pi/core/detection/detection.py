@@ -93,7 +93,7 @@ class Detection:
                         marker_center, marker_size = data
                     else:
                         marker_center = data
-                        marker_size = 0.06  # fallback default
+                        marker_size = 0.0585  # fallback default
 
                     half = marker_size / 2.0
                     object_corners = np.array([

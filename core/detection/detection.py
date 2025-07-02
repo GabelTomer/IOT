@@ -90,7 +90,7 @@ class Detection:
                 if str(markerID) in self.known_markers:
                     aruco_markers.append(markerID)
                     marker_center = self.known_markers[str(markerID)]
-                    marker_size = 0.06  # 6 cm marker
+                    marker_size = 0.0585  # 6 cm marker
                     half = marker_size / 2.0
                     # Define corners in marker coordinate system and shift to global position
                     object_corners = np.array([

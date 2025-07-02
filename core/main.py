@@ -467,13 +467,13 @@ def main():
                 pose = aggregator.get_average_pose()
                 # Camera facing forward = Z-axis; extract forward direction
                 if forward_vector is not None:
-                    robot_heading = math.atan2(forward_vector[1], forward_vector[0])  # Y, X
+                    robot_heading = math.atan2(forward_vector[2], forward_vector[0])  # Z, X
                 if pose is not None:
                     x, y, z = pose
                     # Update server with smoothed average
                     flaskServer.updatePosition(x, y, z, robot_heading)
                     #print Average Camera Position
-                    print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
+                    print(f"Filtered Camera Position -> X: {x:.2f}, Y height: {y:.2f}, Z depth: {z:.2f}")
     
                 current_pos = flaskServer.getPos()
                 target_pos = flaskServer.get_target()
@@ -481,20 +481,16 @@ def main():
                     print(f"Target position: {target_pos}")
 
                     dx = target_pos['x'] - current_pos['x']
-                    dy = target_pos['y'] - current_pos['z'] # z in current position is y (dist)
-                    distance = math.hypot(dx, dy)
-
-
-
-
+                    dz = target_pos['z'] - current_pos['z']
+                    distance = math.hypot(dx, dz)
                             
                     if distance < REACHED_THRESHOLD:
                         cmd, cmd_time = send_command("stop")
                         flaskServer.target_position = None
                         print("=== Reached Target ===")
                     else:
-                        angle_to_target = math.atan2(dy, dx)
-                        if dy < 0:
+                        angle_to_target = math.atan2(dz, dx)
+                        if dz < 0:
                             heading_error = angle_to_target+math.pi
                         else:
                             heading_error = angle_to_target
