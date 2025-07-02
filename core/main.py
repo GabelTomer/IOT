@@ -207,7 +207,7 @@ def resource_path(relative_path):
 
 def kalman_filter_config():
     # === Kalman Filter Configuration ===
-    kalman = cv2.KalmanFilter(6, 3)  # 6 state variables (pos + velocity), 3 measurements (pos only)
+    kalman = cv2.KalmanFilter(6, 3, 0 , cv2.CV_64F)  # 6 state variables (pos + velocity), 3 measurements (pos only)
     # Transition matrix (state update: x = Ax + Bu + w)
     kalman.transitionMatrix = np.array([
         [1, 0, 0, 1, 0, 0],  # x
@@ -216,16 +216,16 @@ def kalman_filter_config():
         [0, 0, 0, 1, 0, 0],  # vx
         [0, 0, 0, 0, 1, 0],  # vy
         [0, 0, 0, 0, 0, 1]   # vz
-    ], dtype=np.float32)
+    ], dtype=np.double)
 
     #Measurement matrix (we only measure position)
-    kalman.measurementMatrix = np.eye(3, 6, dtype=np.float32)
-    kalman.processNoiseCov = np.eye(6, dtype=np.float32) * 1e-4
-    kalman.measurementNoiseCov = np.eye(3, dtype=np.float32) * 1e-2
-    kalman.errorCovPost = np.eye(6, dtype=np.float32)
+    kalman.measurementMatrix = np.eye(3, 6, dtype=np.double)
+    kalman.processNoiseCov = np.eye(6, dtype=np.double) * 1e-4
+    kalman.measurementNoiseCov = np.eye(3, dtype=np.double) * 1e-2
+    kalman.errorCovPost = np.eye(6, dtype=np.double)
     
     # Initial state (0 position, 0 velocity)
-    kalman.statePost = np.zeros((6, 1), dtype=np.float32)
+    kalman.statePost = np.zeros((6, 1), dtype=np.double)
     return kalman
 
 def wifi_listener_and_processor(aggregator, flaskServer, stop_event, port = 6002):
@@ -430,13 +430,13 @@ def main():
                         last_rvec = rvec
                         last_tvec = tvec
                         R, _ = cv2.Rodrigues(rvec)
-                        measured = (-R.T @ tvec).astype(np.float32).reshape(3, 1)
+                        measured = (-R.T @ tvec).astype(np.double).reshape(3, 1)
 
                 elif num_points == 3:
                     flags = cv2.SOLVEPNP_ITERATIVE
                     if last_tvec is None and last_rvec is None:
-                        guess_rvec = np.zeros((3, 1), dtype=np.float32)
-                        guess_tvec = np.zeros((3, 1), dtype=np.float32)
+                        guess_rvec = np.zeros((3, 1), dtype=np.double)
+                        guess_tvec = np.zeros((3, 1), dtype=np.double)
                     else:
                         guess_rvec = last_rvec
                         guess_tvec = last_tvec
@@ -446,7 +446,7 @@ def main():
                                                     useExtrinsicGuess=True, flags=flags)
                     if success:
                         R, _ = cv2.Rodrigues(rvec)
-                        measured = (-R.T @ tvec).astype(np.float32).reshape(3, 1)
+                        measured = (-R.T @ tvec).astype(np.double).reshape(3, 1)
 
                 elif num_points == 2:
                     rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
@@ -456,14 +456,14 @@ def main():
                         pos = -R.T @ tvec.T
                         positions.append(pos)
                         
-                    measured = np.mean(positions, axis = 0).astype(np.float32).reshape(3, 1)
+                    measured = np.mean(positions, axis = 0).astype(np.double).reshape(3, 1)
                     
                 elif num_points == 1:
                     rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
                     rvec = rvecs[0]
                     tvec = tvecs[0]
                     R, _ = cv2.Rodrigues(rvec)
-                    measured = (-R.T @ tvec.T).astype(np.float32).reshape(3, 1)
+                    measured = (-R.T @ tvec.T).astype(np.double).reshape(3, 1)
 
             # Apply Kalman filter only if measured is valid
             if measured is not None and not np.any(np.isnan(measured)):
