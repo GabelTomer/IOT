@@ -408,7 +408,7 @@ def main():
             
             corners, twoDArray, threeDArray, frame, aruco_markers_detected = detector.aruco_detect(frame=frame)
             measured = None
-			forward_vector = None
+            forward_vector = None
             if twoDArray is not None and threeDArray is not None:
                 num_points = len(twoDArray)
                 obj_pts = np.array(threeDArray, dtype=np.float32).reshape(-1, 3)
@@ -464,7 +464,7 @@ def main():
                 aggregator.update_pose((filtered_pos[0][0], filtered_pos[1][0], filtered_pos[2][0]))
                 pose = aggregator.get_average_pose()
 				
-				aruco_markers_detected = np.array(aruco_markers_detected).flatten().tolist() if aruco_markers_detected is not None else []
+                aruco_markers_detected = np.array(aruco_markers_detected).flatten().tolist() if aruco_markers_detected is not None else []
                 if aruco_markers_detected and combined_aruco_ids:
                     try:
                         aruco_list_queue.put_nowait(aruco_markers_detected)
