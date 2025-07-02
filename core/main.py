@@ -406,69 +406,74 @@ def main():
             if not ret:
                 break
             
-            corners, twoDArray, threeDArray, threeDCenters, frame, aruco_markers_detected = detector.aruco_detect(frame=frame)
-            forward_vector = None
+            corners, twoDArray, threeDArray, frame, aruco_markers_detected = detector.aruco_detect(frame=frame)
+            measured = None
+			forward_vector = None
             if twoDArray is not None and threeDArray is not None:
-                if twoDArray.shape[0] < 3:
-                    if len(twoDArray) == 2 and len(threeDArray) == 2:
-                        img_pts = twoDArray.reshape(-1, 2).astype(np.float32)
-                        obj_pts = threeDArray.reshape(-1, 3).astype(np.float32)
-                        success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
-                        if success:
-                            R, _ = cv2.Rodrigues(rvec)
-                            position = -R.T @ tvec
-                            measured = np.array(position, dtype=np.float32).reshape(3, 1)
-                            kalman.correct(measured)
-                            predicted = kalman.predict()
-                            filtered_pos = predicted[:3]
-                            forward_vector = R.T @ np.array([0, 0, 1])
-                            
-                    elif len(twoDArray) == 1:
-                        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
-                        rvec = rvecs[0]
-                        tvec = tvecs[0]
-                        R_marker2cam, _ = cv2.Rodrigues(rvec)
-                        t_marker2cam = tvec.reshape(3, 1)
-                        R_cam2marker = R_marker2cam.T
-                        t_cam2marker = -R_marker2cam.T @ t_marker2cam
-                        center_avg = np.mean(threeDCenters, axis=0).reshape(3, 1)
-                        t_cam2world = R_cam2marker @ t_cam2marker + center_avg
-                        forward_vector = R_cam2marker @ np.array([0, 0, 1])  # Z-axis in world coordinates
+                num_points = len(twoDArray)
+                obj_pts = np.array(threeDArray, dtype=np.float32).reshape(-1, 3)
+                img_pts = np.array(twoDArray, dtype=np.float32).reshape(-1, 2)
+                if obj_pts.shape[0] != img_pts.shape[0]:
+                    print("[WARN] Mismatched 3D and 2D points.")
+                    continue
 
-                        # Compute average position with Kalman Filter
-                        measured = t_cam2world.reshape(3, 1).astype(np.float32)
-                        kalman.correct(measured)
-                        predicted = kalman.predict()
-                        filtered_pos = predicted[:3]
-                
-                elif len(twoDArray) >= 3 and len(threeDArray) >= 3 and len(twoDArray) == len(threeDArray):
-                    flags = cv2.SOLVEPNP_ITERATIVE if len(twoDArray) > 3 else cv2.SOLVEPNP_P3P
-                    img_pts = twoDArray.reshape(-1, 2).astype(np.float32)
-                    obj_pts = threeDArray.reshape(-1, 3).astype(np.float32)
-                    success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags)
+                if num_points >= 4:
+                    flags = cv2.SOLVEPNP_ITERATIVE
+                    success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags=flags)
                     if success:
                         R, _ = cv2.Rodrigues(rvec)
-                        position = -R.T @ tvec
-                        measured = np.array(position, dtype=np.float32).reshape(3, 1)
-                        kalman.correct(measured)
-                        predicted = kalman.predict()
-                        filtered_pos = predicted[:3]
-                        forward_vector = R.T @ np.array([0, 0, 1])  # Z-axis in world coordinates
-                
-                aruco_markers_detected = np.array(aruco_markers_detected).flatten().tolist() if aruco_markers_detected is not None else []
+                        measured = (-R.T @ tvec).astype(np.float32).reshape(3, 1)
+
+                elif num_points == 3:
+                    flags = cv2.SOLVEPNP_ITERATIVE
+                    guess_rvec = np.zeros((3, 1), dtype=np.float32)
+                    guess_tvec = np.zeros((3, 1), dtype=np.float32)
+                    success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs,
+                                                    rvec=guess_rvec, tvec=guess_tvec,
+                                                    useExtrinsicGuess=True, flags=flags)
+                    if success:
+                        R, _ = cv2.Rodrigues(rvec)
+                      
+                        measured = (-R.T @ tvec).astype(np.float32).reshape(3, 1)
+
+                elif num_points == 2:
+                    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
+                    positions = []
+                    for rvec, tvec in zip(rvecs, tvecs):
+                        R, _ = cv2.Rodrigues(rvec)
+                        pos = -R.T @ tvec.T
+                        positions.append(pos)
+                    measured = np.mean(positions, axis=0).astype(np.float32).reshape(3, 1)
+
+                elif num_points == 1:
+                    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
+                    rvec = rvecs[0]
+                    tvec = tvecs[0]
+                    R, _ = cv2.Rodrigues(rvec)
+                    measured = (-R.T @ tvec.T).astype(np.float32).reshape(3, 1)
+
+            # Apply Kalman filter only if measured is valid
+            if measured is not None and not np.any(np.isnan(measured)):
+                kalman.correct(measured)
+                predicted = kalman.predict()
+                filtered_pos = predicted[:3]
+
+                if 'rvec' in locals() and 'tvec' in locals():
+                    cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
+
+                aggregator.update_pose((filtered_pos[0][0], filtered_pos[1][0], filtered_pos[2][0]))
+                pose = aggregator.get_average_pose()
+				
+				aruco_markers_detected = np.array(aruco_markers_detected).flatten().tolist() if aruco_markers_detected is not None else []
                 if aruco_markers_detected and combined_aruco_ids:
                     try:
                         aruco_list_queue.put_nowait(aruco_markers_detected)
                     except queue.Full:
                         pass  # skip frame if too many pending updates
-                        
-                cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
-                aggregator.update_pose((filtered_pos[0][0],filtered_pos[1][0],filtered_pos[2][0]))
-                pose = aggregator.get_average_pose()
                 # Camera facing forward = Z-axis; extract forward direction
                 if forward_vector is not None:
                     robot_heading = math.atan2(forward_vector[2], forward_vector[0])  # Z, X
-                if pose is not None:
+                if pose:
                     x, y, z = pose
                     # Update server with smoothed average
                     flaskServer.updatePosition(x, y, z, robot_heading)

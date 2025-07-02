@@ -69,48 +69,35 @@ class Detection:
         aruco_dict = cv.aruco.getPredefinedDictionary(self.ARUCO_DICT[marker_dict])
         parameters = cv.aruco.DetectorParameters_create()
         parameters.cornerRefinementMethod = cv.aruco.CORNER_REFINE_SUBPIX
-        gray = cv.cvtColor(frame,cv.COLOR_BGR2GRAY)
+        gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+
+        all_corners = []
+        all_found_2d = []
+        all_centers_3d = []
         corners, ids, _ = cv.aruco.detectMarkers(gray,aruco_dict,parameters=parameters)
         aruco_markers = []
         foundMarkers = False
 
         if ids is not None and len(corners) > 0:
             ids = ids.flatten()
-            found_2d = []
-            found_3d = []
-            found_3d_centers = []
             for markerCorner, markerID in zip(corners, ids):
                 corner_points = markerCorner[0]
-                cX = int(np.average(corner_points[:, 0]))
-                cY = int(np.average(corner_points[:, 1]))
+                cX = np.mean(corner_points[:, 0])
+                cY = np.mean(corner_points[:, 1])
+                center_2d = np.array([cX, cY], dtype=np.float32)
                 cv.polylines(frame, [np.int32(corner_points)], True, (0, 255, 0), 2)
-                cv.putText(frame, str(markerID), (cX - 15, cY - 15),
+                cv.putText(frame, f"{markerID}", (int(cX) - 15, int(cY) - 15),
                            cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
                 if str(markerID) in self.known_markers:
                     aruco_markers.append(markerID)
-                    marker_center = self.known_markers[str(markerID)]
-                    marker_size = 0.0585  # 6 cm marker
-                    half = marker_size / 2.0
-                    # Define corners in marker coordinate system and shift to global position
-                    object_corners = np.array([
-                        [-half,  half, 0.0],
-                        [ half,  half, 0.0],
-                        [ half, -half, 0.0],
-                        [-half, -half, 0.0]
-                    ], dtype=np.float32)
-                    found_3d.append(object_corners)
-                    found_3d_centers.append(marker_center)
-                    found_2d.append(np.int32(corner_points))
-                    foundMarkers = True
-		
+                    marker_center = self.known_markers[markerID_str]
 
-            if foundMarkers:
-                # Ensure the arrays are in the correct format
-                twoDArray = np.array(found_2d, dtype=np.float32)
-                threeDArray = np.array(found_3d, dtype=np.float32)
-                centersArray = np.array(found_3d_centers, dtype=np.float32)
-                return corners,twoDArray, threeDArray, centersArray, frame, aruco_markers
+                    all_corners.append(markerCorner)
+                    all_found_2d.append(center_2d)
+                    all_centers_3d.append(marker_center)
 
-        # If no markers are found, return None for arrays
-        return None,None, None, None, frame, None
+            return all_corners, np.array(all_found_2d, dtype=np.float32), np.array(all_centers_3d, dtype=np.float32), frame, aruco_markers
+        else:
+            return None, None, None, frame, None
+
