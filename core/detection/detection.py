@@ -98,7 +98,7 @@ class Detection:
                         [ half,  half, 0.0],
                         [ half, -half, 0.0],
                         [-half, -half, 0.0]
-                    ], dtype=np.float32) + marker_center
+                    ], dtype=np.float32)
                     found_3d.append(object_corners)
                     found_3d_centers.append(marker_center)
                     found_2d.append(np.int32(corner_points))

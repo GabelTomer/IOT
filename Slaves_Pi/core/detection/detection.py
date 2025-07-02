@@ -101,7 +101,7 @@ class Detection:
                         [ half,  half, 0.0],
                         [ half, -half, 0.0],
                         [-half, -half, 0.0]
-                    ], dtype=np.float32) + marker_center
+                    ], dtype=np.float32)
 
                     all_corners.append(markerCorner)
                     all_found_2d.append(np.int32(corner_points))
