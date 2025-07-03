@@ -23,7 +23,7 @@ R_to_main = np.array([
 if COMMUNICATION_METHOD == "wifi":
     HEADER = 0xFAF320
     import socket
-    HOST = "192.168.7.29"
+    HOST = "192.168.0.100"
     PORT = 6002
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -218,7 +218,7 @@ def generate_aruco_board():
 
 def kalman_filter_config():
     # === Kalman Filter Configuration ===
-    kalman = cv2.KalmanFilter(6, 3)  # 6 state variables (pos + velocity), 3 measurements (pos only)
+    kalman = cv2.KalmanFilter(6, 3, 0 , cv2.CV_64F)  # 6 state variables (pos + velocity), 3 measurements (pos only)
     # Transition matrix (state update: x = Ax + Bu + w)
     kalman.transitionMatrix = np.array([
         [1, 0, 0, 1, 0, 0],  # x
@@ -227,16 +227,16 @@ def kalman_filter_config():
         [0, 0, 0, 1, 0, 0],  # vx
         [0, 0, 0, 0, 1, 0],  # vy
         [0, 0, 0, 0, 0, 1]   # vz
-    ], dtype=np.float32)
+    ], dtype=np.double)
 
     #Measurement matrix (we only measure position)
-    kalman.measurementMatrix = np.eye(3, 6, dtype=np.float32)
-    kalman.processNoiseCov = np.eye(6, dtype=np.float32) * 1e-4
-    kalman.measurementNoiseCov = np.eye(3, dtype=np.float32) * 1e-2
-    kalman.errorCovPost = np.eye(6, dtype=np.float32)
+    kalman.measurementMatrix = np.eye(3, 6, dtype=np.double)
+    kalman.processNoiseCov = np.eye(6, dtype=np.double) * 1e-4
+    kalman.measurementNoiseCov = np.eye(3, dtype=np.double) * 1e-2
+    kalman.errorCovPost = np.eye(6, dtype=np.double)
     
     # Initial state (0 position, 0 velocity)
-    kalman.statePost = np.zeros((6, 1), dtype=np.float32)
+    kalman.statePost = np.zeros((6, 1), dtype=np.double)
     return kalman
 
 def send_pose(pose, num_of_aruco, aruco_list):
@@ -302,64 +302,78 @@ def main():
             if not ret:
                 break
             
-            corners, twoDArray, threeDArray, threeDCenters, frame, aruco_ids = detector.aruco_detect(frame=frame)
+            corners, twoDArray, threeDArray, frame, aruco_ids = detector.aruco_detect(frame=frame)
+            measured = None
+            forward_vector = None
             if twoDArray is not None and threeDArray is not None:
-                if twoDArray.shape[0] < 3:
-                    if len(twoDArray) == 2 and len(threeDArray) == 2:
-                        img_pts = twoDArray.reshape(-1, 2).astype(np.float32)
-                        obj_pts = threeDArray.reshape(-1, 3).astype(np.float32)
-                        success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
-                        if success:
-                            R, _ = cv2.Rodrigues(rvec)
-                            position = -R.T @ tvec
-                            measured = np.array(position, dtype=np.float32).reshape(3, 1)
-                            kalman.correct(measured)
-                            predicted = kalman.predict()
-                            filtered_pos = predicted[:3]
-                            
-                    elif len(twoDArray) == 1:
-                        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
-                        rvec = rvecs[0]
-                        tvec = tvecs[0]
-                        #R_marker2world = np.eye(3)
-                        #angle_rad = np.pi / 2
-                        #R_marker2world = cv2.Rodrigues(np.array([angle_rad, 0, 0]))[0]
-                        #R_marker2world[:, 1] *= -1  # Flip the y-axis
-                        R_marker2cam, _ = cv2.Rodrigues(rvec)
-                        t_marker2cam = tvec.reshape(3, 1)
-                        R_cam2marker = R_marker2cam.T
-                        t_cam2marker = -R_marker2cam.T @ t_marker2cam
-                        #R_cam2world = R_marker2world @ R_cam2marker
-                        center_avg = np.mean(threeDCenters, axis=0).reshape(3, 1)
-                        t_cam2world = R_cam2marker @ t_cam2marker + center_avg
+                num_points = len(twoDArray)
+                obj_pts = np.array(threeDArray, dtype=np.float32).reshape(-1, 3)
+                img_pts = np.array(twoDArray, dtype=np.float32).reshape(-1, 2)
+                if obj_pts.shape[0] != img_pts.shape[0]:
+                    print("[WARN] Mismatched 3D and 2D points.")
+                    continue
 
+                if num_points >= 4:
+                    #flags = cv2.SOLVEPNP_ITERATIVE
+                    #success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags=flags)
+                    # if success:
+                    #     R, _ = cv2.Rodrigues(rvec)
+                    #     measured = (-R.T @ tvec).astype(np.float32).reshape(3, 1)
+                    success, rvec, tvec, inliners = cv2.solvePnPRansac(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs)
+                    if success and inliners is not None and len(inliners) >= 4:
+                        last_rvec = rvec
+                        last_tvec = tvec
+                        R, _ = cv2.Rodrigues(rvec)
+                        measured = (-R.T @ tvec).astype(np.double).reshape(3, 1)
 
-                        # Compute average position with Kalman Filter
-                        measured = t_cam2world.reshape(3, 1).astype(np.float32)
-                        kalman.correct(measured)
-                        predicted = kalman.predict()
-                        filtered_pos = predicted[:3]
-                
-                elif len(twoDArray) >= 3 and len(threeDArray) >= 3 and len(twoDArray) == len(threeDArray):
-                    flags = cv2.SOLVEPNP_ITERATIVE if len(twoDArray) > 3 else cv2.SOLVEPNP_P3P
-                    img_pts = twoDArray.reshape(-1, 2).astype(np.float32)
-                    obj_pts = threeDArray.reshape(-1, 3).astype(np.float32)
-                    success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags)
+                elif num_points == 3:
+                    flags = cv2.SOLVEPNP_ITERATIVE
+                    if last_tvec is None and last_rvec is None:
+                        guess_rvec = np.zeros((3, 1), dtype=np.double)
+                        guess_tvec = np.zeros((3, 1), dtype=np.double)
+                    else:
+                        guess_rvec = last_rvec
+                        guess_tvec = last_tvec
+                        
+                    success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs,
+                                                    rvec=guess_rvec, tvec=guess_tvec,
+                                                    useExtrinsicGuess=True, flags=flags)
                     if success:
                         R, _ = cv2.Rodrigues(rvec)
-                        position = -R.T @ tvec
-                        measured = np.array(position, dtype=np.float32).reshape(3, 1)
-                        kalman.correct(measured)
-                        predicted = kalman.predict()
-                        filtered_pos = predicted[:3]
+                        measured = (-R.T @ tvec).astype(np.double).reshape(3, 1)
+
+                elif num_points == 2:
+                    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
+                    positions = []
+                    for rvec, tvec in zip(rvecs, tvecs):
+                        R, _ = cv2.Rodrigues(rvec)
+                        pos = -R.T @ tvec.T
+                        positions.append(pos)
+                        
+                    measured = np.mean(positions, axis = 0).astype(np.double).reshape(3, 1)
                     
+                elif num_points == 1:
+                    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
+                    rvec = rvecs[0]
+                    tvec = tvecs[0]
+                    R, _ = cv2.Rodrigues(rvec)
+                    measured = (-R.T @ tvec.T).astype(np.double).reshape(3, 1)
+
+            # Apply Kalman filter only if measured is valid
+            if measured is not None and not np.any(np.isnan(measured)):
+                kalman.correct(measured)
+                predicted = kalman.predict()
+                filtered_pos = predicted[:3]
+
+                if 'rvec' in locals() and 'tvec' in locals():
+                    cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
+				
                 aruco_id_list = np.array(aruco_ids).flatten().tolist() if aruco_ids is not None else []
                 if COMMUNICATION_METHOD == 'i2c':
                     aruco_id_list = aruco_id_list[:MAX_ARUCO_LENGTH]
     
                 num_of_aruco_ids = len(aruco_id_list)
                 pose_global = (R_to_main @ filtered_pos).flatten()
-                cv2.drawFrameAxes(frame, camera.camera_matrix, camera.dist_coeffs, rvec, tvec, 0.05)
                 if COMMUNICATION_METHOD == "i2c" and (not data_queue.full()) and (not aruco_detect_queue.full()):
                     counter = (counter + 1) % 256
                     pose = np.array(pose_global, dtype = np.float16).view(np.uint16)

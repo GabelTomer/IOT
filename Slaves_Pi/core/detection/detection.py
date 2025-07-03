@@ -40,83 +40,64 @@ class Detection:
 
         self.known_markers = self.load_known_markers(known_markers_path) if known_markers_path else {}
     
-    def update_known_markers(self):
-        self.known_markers = self.load_known_markers(self.known_markers_path)
+    def update_known_markers(self, room="1"):
+        self.known_markers = self.load_known_markers(self.known_markers_path, room)
     
-    def load_known_markers(self, path):
+    
+    def load_known_markers(self, path, room="1"):
         with open(path, 'r') as file:
             data = json.load(file)
         
         known_markers = {}
-        for k, v in data.items():
-            if isinstance(v, dict):
-                # Extract x, y, z from dict
-                known_markers[str(k)] = np.array([v["x"], v["y"], v["z"]], dtype=np.float32)
-            elif isinstance(v, list):
-                # Directly use the list
-                known_markers[str(k)] = np.array(v, dtype=np.float32)
-            else:
-                raise ValueError(f"[ERROR] Invalid marker format for marker {k}: {v}")
+        if room in data:
+            data = data[room]
+            for  marker, values in data.items():
+                if marker == "origin" or marker == "boundry" or marker == "width" or marker == "height":
+                    # Skip origin and boundary markers
+                    continue
+                if isinstance(values, dict):
+                    # Extract x, y, z from dict
+                    known_markers[str(marker)] = np.array([values["x"], values["y"], values["z"]], dtype=np.double)
+                elif isinstance(values, list):
+                    # Directly use the list
+                    known_markers[str(marker)] = np.array(values, dtype=np.double)
+                else:
+                    raise ValueError(f"[ERROR] Invalid marker format for marker {marker}: {values}")
         return known_markers
 
-    def aruco_detect(self, frame):
+    def aruco_detect(self, frame, marker_dict="DICT_4X4_50"):
+        aruco_dict = cv.aruco.getPredefinedDictionary(self.ARUCO_DICT[marker_dict])
         parameters = cv.aruco.DetectorParameters_create()
         parameters.cornerRefinementMethod = cv.aruco.CORNER_REFINE_SUBPIX
         gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
 
         all_corners = []
         all_found_2d = []
-        all_found_3d = []
         all_centers_3d = []
-        all_detected_ids = []
+        corners, ids, _ = cv.aruco.detectMarkers(gray,aruco_dict,parameters=parameters)
+        aruco_markers = []
+        foundMarkers = False
 
-        for name, dict_id in self.ARUCO_DICT.items():
-            aruco_dict = cv.aruco.getPredefinedDictionary(dict_id)
-            corners, ids, _ = cv.aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
-
-            if ids is None:
-                continue
-
+        if ids is not None and len(corners) > 0:
             ids = ids.flatten()
             for markerCorner, markerID in zip(corners, ids):
                 corner_points = markerCorner[0]
-                cX = int(np.average(corner_points[:, 0]))
-                cY = int(np.average(corner_points[:, 1]))
+                cX = np.mean(corner_points[:, 0])
+                cY = np.mean(corner_points[:, 1])
+                center_2d = np.array([cX, cY], dtype=np.double)
                 cv.polylines(frame, [np.int32(corner_points)], True, (0, 255, 0), 2)
-                cv.putText(frame, f"{markerID}", (cX - 15, cY - 15),
-                        cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                cv.putText(frame, f"{markerID}", (int(cX) - 15, int(cY) - 15),
+                           cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-                markerID_str = str(markerID)
-                if markerID_str in self.known_markers:
-                    data = self.known_markers[markerID_str]
-                    if isinstance(data, tuple):
-                        marker_center, marker_size = data
-                    else:
-                        marker_center = data
-                        marker_size = 0.0585  # fallback default
-
-                    half = marker_size / 2.0
-                    object_corners = np.array([
-                        [-half,  half, 0.0],
-                        [ half,  half, 0.0],
-                        [ half, -half, 0.0],
-                        [-half, -half, 0.0]
-                    ], dtype=np.float32)
+                if str(markerID) in self.known_markers:
+                    aruco_markers.append(markerID)
+                    marker_center = self.known_markers[str(markerID)]
 
                     all_corners.append(markerCorner)
-                    all_found_2d.append(np.int32(corner_points))
-                    all_found_3d.append(object_corners)
+                    all_found_2d.append(center_2d)
                     all_centers_3d.append(marker_center)
-                    all_detected_ids.append(markerID)
 
-        if all_detected_ids:
-            return (
-                all_corners,
-                np.array(all_found_2d, dtype=np.float32),
-                np.array(all_found_3d, dtype=np.float32),
-                np.array(all_centers_3d, dtype=np.float32),
-                frame,
-                all_detected_ids
-            )
+            return all_corners, np.array(all_found_2d, dtype=np.double), np.array(all_centers_3d, dtype=np.double), frame, aruco_markers
         else:
-            return None, None, None, None, frame, None
+            return None, None, None, frame, None
+
