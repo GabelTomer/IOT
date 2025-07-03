@@ -6,7 +6,7 @@ from utils import Camera
 from detection import Detection
 import sys
 from server.flaskServer import server
-
+import threading
 # --- General GLOBAL Variables --- 
 COMMUNICATION_METHOD = 'wifi'  # ← change to 'WiFi or i2c' when needed
 GENERATE_ARUCO_BOARD = False
