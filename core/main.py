@@ -362,7 +362,7 @@ def main():
     detector = Detection(known_markers_path="core/utils/known_markers.json")
 
     known_markers = detector.known_markers
-    flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector)
+    flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector, left_camera_ip="192.168.0.101", right_camera_ip="192.168.0.102")
     aggregator = PoseAggregator()
     stop_event = threading.Event()
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
