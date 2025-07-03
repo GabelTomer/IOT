@@ -3,6 +3,8 @@ import json
 import threading
 import time
 import requests
+from flask import after_this_request
+
 class server:
     def __init__(self,  port = 5000, known_markers_path=None, detector=None, left_camera_ip=None, right_camera_ip=None):
         self.target_position = None
@@ -79,8 +81,11 @@ class server:
             if room in self.known_markers:
                 self.roomChanged = True
                 self.detector.update_known_markers(room=room)
-                notify_camera_room_selection(self.left_camera_ip, room)
-                notify_camera_room_selection(self.right_camera_ip, room)
+                @after_this_request
+                def notify(response):  # <- executes after Flask finishes response
+                    notify_camera_room_selection(self.left_camera_ip, room)
+                    notify_camera_room_selection(self.right_camera_ip, room)
+                    return response
                 return jsonify({"status": "success", "room": room})
             else:
                 return jsonify({"error": "Room not found"}), 404
@@ -88,13 +93,12 @@ class server:
         def notify_camera_room_selection(camera_ip, room):
             if camera_ip is not None:
                 try:
-                    response = requests.post(
+                    requests.post(
                         f"http://{camera_ip}:5000/notify_room_selection",
                         json={"room": room},
-                        timeout=2
+                        timeout=1
                     )
-                    if response.status_code == 200:
-                        print(f"Camera at {camera_ip} notified of room selection: {room}")
+                    print(f"Camera at {camera_ip} notified of room selection: {room}")
                 except requests.exceptions.RequestException as e:
                     print(f"Failed to notify camera at {camera_ip}: {e}")
         
@@ -122,22 +126,23 @@ class server:
             markers = self.known_markers[room]
             markers[marker_id] = {"x": x, "y": y, "z": z}
             self.save_markers(self.known_markers, room=room)
-            notify_camera_marker_update(self.left_camera_ip, marker_id, x, y, z)
-            notify_camera_marker_update(self.right_camera_ip, marker_id, x, y, z)
+            @after_this_request
+            def notify(response):  # <- executes after Flask finishes response
+                notify_camera_marker_update(self.left_camera_ip, marker_id, x, y, z)
+                notify_camera_marker_update(self.right_camera_ip, marker_id, x, y, z)
+                return response
             return jsonify({"status": "updated", "id": marker_id}), 200
         
         def notify_camera_marker_update(camera_ip, marker_id, x, y, z):
             if camera_ip is not None:
                 try:
-                    response = requests.post(
+                    requests.post(
                         f"http://{camera_ip}:5000/update_marker",
                         json={"id": marker_id, "x": x, "y": y, "z": z},
-                        timeout=2
+                        timeout=1  # short timeout
                     )
-                    if response.status_code == 200:
-                        print(f"Camera at {camera_ip} notified of marker update: {marker_id}")
                 except requests.exceptions.RequestException as e:
-                    print(f"Failed to notify camera at {camera_ip}: {e}")
+                    print(f"[WARN] Failed to notify {camera_ip} marker update: {e}")
         
         
         @self.app.route('/change_room_shape', methods=['POST'])
@@ -169,8 +174,11 @@ class server:
                 return jsonify({"error": "Room not found"}), 404
             del self.known_markers[room_name]
             self.save_markers(self.known_markers)
-            notify_camera_room_deletion(self.left_camera_ip, room_name)
-            notify_camera_room_deletion(self.right_camera_ip, room_name)
+            @after_this_request
+            def notify(response):  # <- executes after Flask finishes response
+                notify_camera_room_deletion(self.left_camera_ip, room_name)
+                notify_camera_room_deletion(self.right_camera_ip, room_name)
+                return response
             return jsonify({"status": "deleted", "name": room_name}), 200
             
         def notify_camera_room_deletion(camera_ip, room_name):
@@ -179,10 +187,9 @@ class server:
                     response = requests.post(
                         f"http://{camera_ip}:5000/delete_room",
                         json={"room": room_name},
-                        timeout=2
+                        timeout=1
                     )
-                    if response.status_code == 200:
-                        print(f"Camera at {camera_ip} notified of room deletion: {room_name}")
+                    print(f"Camera at {camera_ip} notified of room deletion: {room_name}")
                 except requests.exceptions.RequestException as e:
                     print(f"Failed to notify camera at {camera_ip}: {e}")
         
@@ -200,8 +207,11 @@ class server:
             if marker_id in markers:
                 del markers[marker_id]
                 self.save_markers(self.known_markers, room=room)
-                notify_camera_marker_deletion(self.left_camera_ip, marker_id, room)
-                notify_camera_marker_deletion(self.right_camera_ip, marker_id, room)
+                @after_this_request
+                def notify(response):  # <- executes after Flask finishes response
+                    notify_camera_marker_deletion(self.left_camera_ip, marker_id, room)
+                    notify_camera_marker_deletion(self.right_camera_ip, marker_id, room)
+                    return response
                 return jsonify({"status": "deleted", "id": marker_id}), 200
             else:
                 return jsonify({"error": "Marker not found"}), 404
@@ -212,10 +222,9 @@ class server:
                     response = requests.post(
                         f"http://{camera_ip}:5000/delete_marker",
                         json={"id": marker_id, "room": room},
-                        timeout=2
+                        timeout=1
                     )
-                    if response.status_code == 200:
-                        print(f"Camera at {camera_ip} notified of marker deletion: {marker_id}")
+                    print(f"Camera at {camera_ip} notified of marker deletion: {marker_id}")
                 except requests.exceptions.RequestException as e:
                     print(f"Failed to notify camera at {camera_ip}: {e}")
                     
@@ -242,8 +251,11 @@ class server:
             if marker_id and all(v is not None for v in [x, y, z, room]):
                 self.known_markers[room][marker_id] = {'x': x, 'y': y, 'z': z}
                 self.save_markers(self.known_markers, room=room)
-                notify_camera_marker_addition(self.left_camera_ip, marker_id, x, y, z, room)
-                notify_camera_marker_addition(self.right_camera_ip, marker_id, x, y, z, room)
+                @after_this_request
+                def notify(response):  # <- executes after Flask finishes response
+                    notify_camera_marker_addition(self.left_camera_ip, marker_id, x, y, z, room)
+                    notify_camera_marker_addition(self.right_camera_ip, marker_id, x, y, z, room)
+                    return response
                 return jsonify({'status': 'success'}), 200
             return jsonify({'error': 'Invalid input'}), 400
         
@@ -253,10 +265,9 @@ class server:
                     response = requests.post(
                         f"http://{camera_ip}:5000/add_marker",
                         json={"id": marker_id, "x": x, "y": y, "z": z, "room": room},
-                        timeout=2
+                        timeout=1
                     )
-                    if response.status_code == 200:
-                        print(f"Camera at {camera_ip} notified of marker addition: {marker_id}")
+                    print(f"Camera at {camera_ip} notified of marker addition: {marker_id}")
                 except requests.exceptions.RequestException as e:
                     print(f"Failed to notify camera at {camera_ip}: {e}")
         
@@ -267,8 +278,11 @@ class server:
             if room_name:
                 self.known_markers[room_name] = {}
                 self.save_markers(self.known_markers, room = self.chosen_room)
-                notify_camera_room_addition(self.left_camera_ip, room_name)
-                notify_camera_room_addition(self.right_camera_ip, room_name)
+                @after_this_request
+                def notify(response):  # <- executes after Flask finishes response
+                    notify_camera_room_addition(self.left_camera_ip, room_name)
+                    notify_camera_room_addition(self.right_camera_ip, room_name)
+                    return response
                 return jsonify({'status': 'success'}), 200
             return jsonify({'error': 'Invalid input'}), 400
         
@@ -278,10 +292,9 @@ class server:
                     response = requests.post(
                         f"http://{camera_ip}:5000/add_room",
                         json={"room": room_name},
-                        timeout=2
+                        timeout=1
                     )
-                    if response.status_code == 200:
-                        print(f"Camera at {camera_ip} notified of room addition: {room_name}")
+                    print(f"Camera at {camera_ip} notified of room addition: {room_name}")
                 except requests.exceptions.RequestException as e:
                     print(f"Failed to notify camera at {camera_ip}: {e}")
         
