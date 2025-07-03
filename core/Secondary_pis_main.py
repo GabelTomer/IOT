@@ -5,6 +5,7 @@ import numpy as np
 from utils import Camera
 from detection import Detection
 import sys
+from server.flaskServer import server
 
 # --- General GLOBAL Variables --- 
 COMMUNICATION_METHOD = 'wifi'  # ← change to 'WiFi or i2c' when needed
@@ -64,6 +65,11 @@ def is_gui_available():
             _gui_available = False
             print("GUI is not available (running in a headless environment or as a service).")
     return _gui_available
+
+def runServer(flaskServer: server):
+    
+    flaskServer.setup_routes()
+    flaskServer.run()
 
 def should_send_pose(current_pose, last_pose):
     if last_pose is None:
@@ -252,6 +258,7 @@ def send_pose(pose, num_of_aruco, aruco_list):
         
     except Exception as e:
         print(f"[UDP ERROR] Failed to send pose: {e}")
+combined_aruco_ids = {}
 
 def main():
     
@@ -268,7 +275,7 @@ def main():
      
     # --- Camera Calibration ---        
     recalibrate = False
-    camera = Camera()
+    camera = Camera(gui_available=_gui_available)
 
     while not recalibrate:
         mean_error = camera.calibrate_camera()
@@ -280,7 +287,9 @@ def main():
             print("Retrying calibration. Got error:", mean_error)
         
     detector = Detection(known_markers_path="core/utils/known_markers.json")
-    
+    flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector)
+    server_thread = threading.Thread(target=runServer, args=(flaskServer,))
+    server_thread.start()
     # Choose communication method: 'wifi' or 'i2c'
     if COMMUNICATION_METHOD == 'i2c':
         stop_event = threading.Event()
@@ -304,7 +313,6 @@ def main():
             
             corners, twoDArray, threeDArray, frame, aruco_ids = detector.aruco_detect(frame=frame)
             measured = None
-            forward_vector = None
             if twoDArray is not None and threeDArray is not None:
                 num_points = len(twoDArray)
                 obj_pts = np.array(threeDArray, dtype=np.float32).reshape(-1, 3)
@@ -314,11 +322,6 @@ def main():
                     continue
 
                 if num_points >= 4:
-                    #flags = cv2.SOLVEPNP_ITERATIVE
-                    #success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags=flags)
-                    # if success:
-                    #     R, _ = cv2.Rodrigues(rvec)
-                    #     measured = (-R.T @ tvec).astype(np.float32).reshape(3, 1)
                     success, rvec, tvec, inliners = cv2.solvePnPRansac(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs)
                     if success and inliners is not None and len(inliners) >= 4:
                         last_rvec = rvec
@@ -391,7 +394,6 @@ def main():
                 print(f"Filtered Camera Position -> X: {pose_global[0]:.4f}, Y: {pose_global[1]:.4f}, Z: {pose_global[2]:.4f}")
     
             else:
-                print("[ERROR] twoDArray or threeDArray is None!")
                 if COMMUNICATION_METHOD == "i2c" and (not data_queue.full()) and (not aruco_detect_queue.full()):
                     counter = (counter + 1) % 256
                     # Create float16 NaNs for x, y, z

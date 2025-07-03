@@ -2,9 +2,9 @@ from flask import Flask, jsonify, request
 import json
 import threading
 import time
-
+import requests
 class server:
-    def __init__(self,  port = 5000, known_markers_path=None, detector=None):
+    def __init__(self,  port = 5000, known_markers_path=None, detector=None, left_camera_ip=None, right_camera_ip=None):
         self.target_position = None
         self.detector = detector
         self.chosen_room = None
@@ -14,6 +14,8 @@ class server:
         self.port = port
         self.roomChanged = False
         self.arucoList = None
+        self.left_camera_ip = left_camera_ip
+        self.right_camera_ip = right_camera_ip
         self.position = {
             'x': 0.0,
             'y': 0.0,
@@ -77,9 +79,24 @@ class server:
             if room in self.known_markers:
                 self.roomChanged = True
                 self.detector.update_known_markers(room=room)
+                notify_camera_room_selection(self.left_camera_ip, room)
+                notify_camera_room_selection(self.right_camera_ip, room)
                 return jsonify({"status": "success", "room": room})
             else:
                 return jsonify({"error": "Room not found"}), 404
+            
+        def notify_camera_room_selection(camera_ip, room):
+            if camera_ip is not None:
+                try:
+                    response = requests.post(
+                        f"http://{camera_ip}:5000/notify_room_selection",
+                        json={"room": room},
+                        timeout=2
+                    )
+                    if response.status_code == 200:
+                        print(f"Camera at {camera_ip} notified of room selection: {room}")
+                except requests.exceptions.RequestException as e:
+                    print(f"Failed to notify camera at {camera_ip}: {e}")
         
         @self.app.route('/update_position', methods=['POST']) #gets input from application on where to move
         def update_position():
@@ -105,7 +122,23 @@ class server:
             markers = self.known_markers[room]
             markers[marker_id] = {"x": x, "y": y, "z": z}
             self.save_markers(self.known_markers, room=room)
+            notify_camera_marker_update(self.left_camera_ip, marker_id, x, y, z)
+            notify_camera_marker_update(self.right_camera_ip, marker_id, x, y, z)
             return jsonify({"status": "updated", "id": marker_id}), 200
+        
+        def notify_camera_marker_update(camera_ip, marker_id, x, y, z):
+            if camera_ip is not None:
+                try:
+                    response = requests.post(
+                        f"http://{camera_ip}:5000/update_marker",
+                        json={"id": marker_id, "x": x, "y": y, "z": z},
+                        timeout=2
+                    )
+                    if response.status_code == 200:
+                        print(f"Camera at {camera_ip} notified of marker update: {marker_id}")
+                except requests.exceptions.RequestException as e:
+                    print(f"Failed to notify camera at {camera_ip}: {e}")
+        
         
         @self.app.route('/change_room_shape', methods=['POST'])
         def change_room_shape():
@@ -136,8 +169,23 @@ class server:
                 return jsonify({"error": "Room not found"}), 404
             del self.known_markers[room_name]
             self.save_markers(self.known_markers)
+            notify_camera_room_deletion(self.left_camera_ip, room_name)
+            notify_camera_room_deletion(self.right_camera_ip, room_name)
             return jsonify({"status": "deleted", "name": room_name}), 200
             
+        def notify_camera_room_deletion(camera_ip, room_name):
+            if camera_ip is not None:
+                try:
+                    response = requests.post(
+                        f"http://{camera_ip}:5000/delete_room",
+                        json={"room": room_name},
+                        timeout=2
+                    )
+                    if response.status_code == 200:
+                        print(f"Camera at {camera_ip} notified of room deletion: {room_name}")
+                except requests.exceptions.RequestException as e:
+                    print(f"Failed to notify camera at {camera_ip}: {e}")
+        
         
         @self.app.route('/delete_marker', methods=['POST'])
         def delete_marker():
@@ -152,10 +200,25 @@ class server:
             if marker_id in markers:
                 del markers[marker_id]
                 self.save_markers(self.known_markers, room=room)
+                notify_camera_marker_deletion(self.left_camera_ip, marker_id, room)
+                notify_camera_marker_deletion(self.right_camera_ip, marker_id, room)
                 return jsonify({"status": "deleted", "id": marker_id}), 200
             else:
                 return jsonify({"error": "Marker not found"}), 404
         
+        def notify_camera_marker_deletion(camera_ip, marker_id, room):
+            if camera_ip is not None:
+                try:
+                    response = requests.post(
+                        f"http://{camera_ip}:5000/delete_marker",
+                        json={"id": marker_id, "room": room},
+                        timeout=2
+                    )
+                    if response.status_code == 200:
+                        print(f"Camera at {camera_ip} notified of marker deletion: {marker_id}")
+                except requests.exceptions.RequestException as e:
+                    print(f"Failed to notify camera at {camera_ip}: {e}")
+                    
         
         @self.app.route('/get_position')
         def get_position():
@@ -179,8 +242,23 @@ class server:
             if marker_id and all(v is not None for v in [x, y, z, room]):
                 self.known_markers[room][marker_id] = {'x': x, 'y': y, 'z': z}
                 self.save_markers(self.known_markers, room=room)
+                notify_camera_marker_addition(self.left_camera_ip, marker_id, x, y, z, room)
+                notify_camera_marker_addition(self.right_camera_ip, marker_id, x, y, z, room)
                 return jsonify({'status': 'success'}), 200
             return jsonify({'error': 'Invalid input'}), 400
+        
+        def notify_camera_marker_addition(camera_ip, marker_id, x, y, z, room):
+            if camera_ip is not None:
+                try:
+                    response = requests.post(
+                        f"http://{camera_ip}:5000/add_marker",
+                        json={"id": marker_id, "x": x, "y": y, "z": z, "room": room},
+                        timeout=2
+                    )
+                    if response.status_code == 200:
+                        print(f"Camera at {camera_ip} notified of marker addition: {marker_id}")
+                except requests.exceptions.RequestException as e:
+                    print(f"Failed to notify camera at {camera_ip}: {e}")
         
         @self.app.route('/add_room', methods=['POST'])
         def add_room():
@@ -189,8 +267,23 @@ class server:
             if room_name:
                 self.known_markers[room_name] = {}
                 self.save_markers(self.known_markers, room = self.chosen_room)
+                notify_camera_room_addition(self.left_camera_ip, room_name)
+                notify_camera_room_addition(self.right_camera_ip, room_name)
                 return jsonify({'status': 'success'}), 200
             return jsonify({'error': 'Invalid input'}), 400
+        
+        def notify_camera_room_addition(camera_ip, room_name):
+            if camera_ip is not None:
+                try:
+                    response = requests.post(
+                        f"http://{camera_ip}:5000/add_room",
+                        json={"room": room_name},
+                        timeout=2
+                    )
+                    if response.status_code == 200:
+                        print(f"Camera at {camera_ip} notified of room addition: {room_name}")
+                except requests.exceptions.RequestException as e:
+                    print(f"Failed to notify camera at {camera_ip}: {e}")
         
         @self.app.route('/set_target', methods=['POST'])
         def set_target():
