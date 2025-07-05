@@ -45,10 +45,9 @@ elif COMMUNICATION_METHOD == "wifi":
 
 
 # --- GLOBAL Variables and Intialization of 3D Visulaization ---
-combined_aruco_ids = {}
+combined_aruco_ids = set()
 aruco_ids_lock = threading.Lock()
 _gui_available = None
-aruco_list_queue = queue.Queue(maxsize = 5000)
 
 def is_gui_available():
     """
@@ -78,21 +77,14 @@ def make_callback(addr):
     return callback
 
 def plot_updater_thread(aggregator, stop_event, flaskServer = None):
-    global combined_aruco_ids, aruco_list_queue
+    global combined_aruco_ids
     print("Started plot update thread")
     while not stop_event.is_set():
-        # Update global set
-        if combined_aruco_ids:
-            with aruco_ids_lock:
-                try:
-                    aruco_list = aruco_list_queue.get_nowait()
-                    for marker in aruco_list:
-                            combined_aruco_ids[str(marker)] =  (combined_aruco_ids[str(marker)] + 1) % 5
-                except queue.Empty:
-                    pass
-                # Call your visual update with all seen markers
-                #update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_ids)
-                flaskServer.updateIds(combined_aruco_ids)
+        with aruco_ids_lock:
+            # Call your visual update with all seen markers
+            #update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_ids)
+            flaskServer.updateIds(list(combined_aruco_ids))
+            combined_aruco_ids.clear()
                 
         time.sleep(0.02)
 
@@ -249,8 +241,7 @@ def wifi_listener_and_processor(aggregator, flaskServer, stop_event, port = 6002
                     x, y, z = avg_pose
                     flaskServer.updatePosition(x, y, z)
                     with aruco_ids_lock:
-                        for marker in aruco_list:
-                            combined_aruco_ids[str(marker)] = (combined_aruco_ids[str(marker)] + 1) % 5
+                        combined_aruco_ids.update(aruco_list)
         
         except Exception as e:
             print(f"[UDP] Error: {e}")
@@ -362,7 +353,7 @@ def main():
     detector = Detection(known_markers_path="core/utils/known_markers.json")
 
     known_markers = detector.known_markers
-    flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector)
+    flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector, left_camera_ip="192.168.0.101", right_camera_ip="192.168.0.102")
     aggregator = PoseAggregator()
     stop_event = threading.Event()
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
@@ -478,12 +469,10 @@ def main():
                 pose = aggregator.get_average_pose()
 				
                 aruco_markers_detected = np.array(aruco_markers_detected).flatten().tolist() if aruco_markers_detected is not None else []
-                if aruco_markers_detected and combined_aruco_ids:
-                    try:
-                        aruco_list_queue.put_nowait(aruco_markers_detected)
-                    except queue.Full:
-                        pass  # skip frame if too many pending updates
-                # Camera facing forward = Z-axis; extract forward direction
+                if aruco_markers_detected:
+                    with aruco_ids_lock:
+                        combined_aruco_ids.update(aruco_markers_detected)
+                        
                 if forward_vector is not None:
                     robot_heading = math.atan2(forward_vector[2], forward_vector[0])  # Z, X
                 if pose:
