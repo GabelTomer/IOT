@@ -42,6 +42,10 @@ elif COMMUNICATION_METHOD == "wifi":
     import socket
     import queue
     PORT = 6002
+    SLAVE_CONFIG_WIFI = {
+    1 : 0,
+    2: 0,
+    }
 
 
 # --- GLOBAL Variables and Intialization of 3D Visulaization ---
@@ -229,6 +233,7 @@ def kalman_filter_config():
     return kalman
 
 def wifi_listener_and_processor(aggregator, flaskServer, stop_event, port = 6002):
+    first_time ={1 : True, 2: True}
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(('', port))
     print(f"[UDP] Listening and processing on port {port}")
@@ -237,20 +242,23 @@ def wifi_listener_and_processor(aggregator, flaskServer, stop_event, port = 6002
         try:
             data, addr = sock.recvfrom(512)
             if data[0:3] == b'\xFA\xF3\x20':
-                x, y, z , timestamp = struct.unpack('<3fQ', data[3:23])
+                slave_id, x, y, z ,time_of_slave, timestamp = struct.unpack('<B3fQQ', data[3:32])
                 aruco_list = list(data[23:])
+                if first_time[slave_id]:
+                   SLAVE_CONFIG_WIFI[slave_id] = (time.time_ns() // 1000) - time_of_slave
+                   first_time[slave_id] = False
 
                 pose = (x, y, z)
                 aggregator.update_pose(pose)
                 avg_pose = aggregator.get_average_pose()
                 time_now = time.time_ns() // 1000
-
-                if avg_pose and 0 <= (time_now - timestamp) <= POSE_UPDATE_THRESHOLD:
+                time_diff = (time_now - timestamp) + SLAVE_CONFIG_WIFI[slave_id]
+                
+                if avg_pose and 0 <= time_diff <= POSE_UPDATE_THRESHOLD:
                     x, y, z = avg_pose
                     flaskServer.updatePosition(x, y, z)
                     with aruco_ids_lock:
-                        for marker in aruco_list:
-                            combined_aruco_ids[str(marker)] = (combined_aruco_ids[str(marker)] + 1) % 5
+                        combined_aruco_ids.update(aruco_list)
         
         except Exception as e:
             print(f"[UDP] Error: {e}")
