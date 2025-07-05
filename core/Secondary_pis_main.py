@@ -369,6 +369,20 @@ def main():
 
             # Apply Kalman filter only if measured is valid
             if measured is not None and not np.any(np.isnan(measured)):
+                marker_id = aruco_ids[0]  # Use the first detected marker
+                marker_pose = detector.known_markers.get(str(marker_id), {})
+                theta_deg = marker_pose.get("theta", 0)
+                theta_rad = np.radians(theta_deg)
+
+                R_marker_to_global = np.array([
+                    [ np.cos(theta_rad), 0, np.sin(theta_rad)],
+                    [ 0,                1, 0                ],
+                    [-np.sin(theta_rad), 0, np.cos(theta_rad)]
+                ])
+
+                measured = R_marker_to_global @ measured
+
+                
                 kalman.correct(measured)
                 predicted = kalman.predict()
                 filtered_pos = predicted[:3]
