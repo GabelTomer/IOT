@@ -149,7 +149,7 @@ class MarkerManager(QWidget):
         self.layout = QVBoxLayout(self)
 
         self.marker_table = QTableWidget()
-        self.marker_table.setColumnCount(4)
+        self.marker_table.setColumnCount(5)
         self.marker_table.setHorizontalHeaderLabels(["ID", "X", "Y", "Z","Theta"])
         self.layout.addWidget(self.marker_table)
 
