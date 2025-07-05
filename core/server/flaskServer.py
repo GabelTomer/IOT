@@ -120,26 +120,28 @@ class server:
             y = data.get("y")
             z = data.get("z")
             room = data.get("room")
-            theta = data.get("theta")
-            if None in [marker_id, x, y, z, room,theta]:
+            yaw = data.get("yaw")
+            pitch = data.get("pitch")
+            roll = data.get("roll")
+            if None in [marker_id, x, y, z, room,yaw, pitch, roll]:
                 return jsonify({"error": "Missing fields"}), 400
 
             markers = self.known_markers[room]
-            markers[marker_id] = {"x": x, "y": y, "z": z,"theta":theta}
+            markers[marker_id] = {"x": x, "y": y, "z": z,"yaw":yaw, "pitch": pitch, "roll": roll}
             self.save_markers(self.known_markers, room=room)
             @after_this_request
             def notify(response):  # <- executes after Flask finishes response
-                notify_camera_marker_update(self.left_camera_ip, marker_id, x, y, z,theta)
-                notify_camera_marker_update(self.right_camera_ip, marker_id, x, y, z,theta)
+                notify_camera_marker_update(self.left_camera_ip, marker_id, x, y, z,yaw, pitch, roll)
+                notify_camera_marker_update(self.right_camera_ip, marker_id, x, y, z,yaw, pitch, roll)
                 return response
             return jsonify({"status": "updated", "id": marker_id}), 200
         
-        def notify_camera_marker_update(camera_ip, marker_id, x, y, z,theta):
+        def notify_camera_marker_update(camera_ip, marker_id, x, y, z,yaw, pitch, roll):
             if camera_ip is not None:
                 try:
                     requests.post(
                         f"http://{camera_ip}:5000/update_marker",
-                        json={"id": marker_id, "x": x, "y": y, "z": z,"theta":theta},
+                        json={"id": marker_id, "x": x, "y": y, "z": z,"yaw":yaw, "pitch": pitch, "roll": roll},
                         timeout=1  # short timeout
                     )
                 except requests.exceptions.RequestException as e:
@@ -249,24 +251,26 @@ class server:
             marker_id = data.get('id')
             x, y, z = data.get('x'), data.get('y'), data.get('z')
             room = data.get('room')
-            theta = data.get('theta')
-            if marker_id and all(v is not None for v in [x, y, z, room, theta]):
-                self.known_markers[room][marker_id] = {'x': x, 'y': y, 'z': z, 'theta':theta}
+            yaw = data.get('yaw')
+            pitch = data.get('pitch')
+            roll = data.get('roll')
+            if marker_id and all(v is not None for v in [x, y, z, room, yaw, pitch, roll]):
+                self.known_markers[room][marker_id] = {'x': x, 'y': y, 'z': z, 'yaw':yaw, 'pitch': pitch, 'roll': roll}
                 self.save_markers(self.known_markers, room=room)
                 @after_this_request
                 def notify(response):  # <- executes after Flask finishes response
-                    notify_camera_marker_addition(self.left_camera_ip, marker_id, x, y, z, room,theta)
-                    notify_camera_marker_addition(self.right_camera_ip, marker_id, x, y, z, room,theta)
+                    notify_camera_marker_addition(self.left_camera_ip, marker_id, x, y, z, room,yaw, pitch, roll)
+                    notify_camera_marker_addition(self.right_camera_ip, marker_id, x, y, z, room,yaw, pitch, roll)
                     return response
                 return jsonify({'status': 'success'}), 200
             return jsonify({'error': 'Invalid input'}), 400
         
-        def notify_camera_marker_addition(camera_ip, marker_id, x, y, z, room,theta):
+        def notify_camera_marker_addition(camera_ip, marker_id, x, y, z, room,yaw, pitch, roll):
             if camera_ip is not None:
                 try:
                     response = requests.post(
                         f"http://{camera_ip}:5000/add_marker",
-                        json={"id": marker_id, "x": x, "y": y, "z": z, "room": room, 'theta':theta},
+                        json={"id": marker_id, "x": x, "y": y, "z": z, "room": room, 'yaw':yaw, 'pitch': pitch, 'roll': roll},
                         timeout=1
                     )
                     print(f"Camera at {camera_ip} notified of marker addition: {marker_id}")

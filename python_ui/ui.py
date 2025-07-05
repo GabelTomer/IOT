@@ -149,8 +149,8 @@ class MarkerManager(QWidget):
         self.layout = QVBoxLayout(self)
 
         self.marker_table = QTableWidget()
-        self.marker_table.setColumnCount(5)
-        self.marker_table.setHorizontalHeaderLabels(["ID", "X", "Y", "Z","Theta"])
+        self.marker_table.setColumnCount(7)
+        self.marker_table.setHorizontalHeaderLabels(["ID", "X", "Y", "Z","Yaw", "Pitch", "Roll"])
         self.layout.addWidget(self.marker_table)
 
         btn_layout = QHBoxLayout()
@@ -192,7 +192,9 @@ class MarkerManager(QWidget):
                 self.marker_table.setItem(row, 1, QTableWidgetItem(str(coords["x"])))
                 self.marker_table.setItem(row, 2, QTableWidgetItem(str(coords["y"])))
                 self.marker_table.setItem(row, 3, QTableWidgetItem(str(coords["z"])))
-                self.marker_table.setItem(row, 4, QTableWidgetItem(str(coords["theta"])))
+                self.marker_table.setItem(row, 4, QTableWidgetItem(str(coords["yaw"])))
+                self.marker_table.setItem(row, 5, QTableWidgetItem(str(coords["pitch"])))
+                self.marker_table.setItem(row, 6, QTableWidgetItem(str(coords["roll"])))
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load markers:\n{e}")
 
@@ -213,12 +215,18 @@ class MarkerManager(QWidget):
         z, ok_z = QInputDialog.getDouble(self, "Add Marker", "Z coordinate:",decimals=4)
         if not ok_z:
             return
-        theta, ok_theta = QInputDialog.getDouble(self, "Add Marker", "Theta:",decimals=4)
-        if not ok_theta:
+        yaw, ok_yaw = QInputDialog.getDouble(self, "Add Marker", "Yaw:",decimals=4)
+        if not ok_yaw:
+            return
+        pitch, ok_pitch = QInputDialog.getDouble(self, "Add Marker", "Pitch:",decimals=4)
+        if not ok_pitch:
+            return
+        roll, ok_roll = QInputDialog.getDouble(self, "Add Marker", "Roll:",decimals=4)
+        if not ok_roll:
             return
 
         try:
-            data = {"room": self.room, "id": marker_id, "x": x, "y": y, "z": z, "theta": theta}
+            data = {"room": self.room, "id": marker_id, "x": x, "y": y, "z": z, "yaw": yaw, "pitch": pitch, "roll": roll}
             resp = requests.post(f"{self.server_url}/add_marker", json=data, timeout=4)
             resp.raise_for_status()
             self.load_markers()
@@ -263,13 +271,20 @@ class MarkerManager(QWidget):
                                          float(self.marker_table.item(selected, 3).text()),decimals=4)
         if not ok_z:
             return
-        theta, ok_theta = QInputDialog.getDouble(self, "Update Marker", "New Theta:",
+        yaw, ok_yaw = QInputDialog.getDouble(self, "Update Marker", "New Yaw:",
                                          float(self.marker_table.item(selected, 4).text()),decimals=4)
-        if not ok_theta:
+        if not ok_yaw:
             return
-
+        pitch, ok_pitch = QInputDialog.getDouble(self, "Update Marker", "New Pitch:",
+                                         float(self.marker_table.item(selected, 4).text()),decimals=4)
+        if not ok_pitch:
+            return
+        roll, ok_roll = QInputDialog.getDouble(self, "Update Marker", "New Roll:",
+                                         float(self.marker_table.item(selected, 4).text()),decimals=4)
+        if not ok_roll:
+            return
         try:
-            data = {"room": self.room, "id": marker_id, "x": x, "y": y, "z": z, "theta": theta}
+            data = {"room": self.room, "id": marker_id, "x": x, "y": y, "z": z, "yaw": yaw, "pitch": pitch, "roll": roll}
             resp = requests.post(f"{self.server_url}/update_marker", json=data, timeout=4)
             resp.raise_for_status()
             self.load_markers()
