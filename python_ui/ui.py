@@ -35,7 +35,7 @@ def prompt_for_ip():
 
 def get_room_list(server_ip):
     try:
-        response = requests.get(f"http://{server_ip}:5000/get_rooms", timeout=2)
+        response = requests.get(f"http://{server_ip}:5000/get_rooms", timeout=4)
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -55,7 +55,7 @@ def notifyRoomSelection(server_ip, room):
         response = requests.post(
             f"http://{server_ip}:5000/notify_room_selection",
             json={"room": room},
-            timeout=2
+            timeout=4
         )
         if response.status_code != 200:
             QMessageBox.warning(None, "Room Error", f"Server responded: {response.text}")
@@ -150,7 +150,7 @@ class MarkerManager(QWidget):
 
         self.marker_table = QTableWidget()
         self.marker_table.setColumnCount(4)
-        self.marker_table.setHorizontalHeaderLabels(["ID", "X", "Y", "Z"])
+        self.marker_table.setHorizontalHeaderLabels(["ID", "X", "Y", "Z","Theta"])
         self.layout.addWidget(self.marker_table)
 
         btn_layout = QHBoxLayout()
@@ -178,7 +178,7 @@ class MarkerManager(QWidget):
     def load_markers(self):
         global known_markers
         try:
-            resp = requests.get(f"{self.server_url}/get_Known_Markers/{self.room}", timeout=2)
+            resp = requests.get(f"{self.server_url}/get_Known_Markers/{self.room}", timeout=4)
             resp.raise_for_status()
             markers = resp.json()  # Expects dict like {"1": {"x":1, "y":1, "z":1}, ...}
             known_markers = markers
@@ -192,6 +192,7 @@ class MarkerManager(QWidget):
                 self.marker_table.setItem(row, 1, QTableWidgetItem(str(coords["x"])))
                 self.marker_table.setItem(row, 2, QTableWidgetItem(str(coords["y"])))
                 self.marker_table.setItem(row, 3, QTableWidgetItem(str(coords["z"])))
+                self.marker_table.setItem(row, 4, QTableWidgetItem(str(coords["theta"])))
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load markers:\n{e}")
 
@@ -212,10 +213,13 @@ class MarkerManager(QWidget):
         z, ok_z = QInputDialog.getDouble(self, "Add Marker", "Z coordinate:",decimals=4)
         if not ok_z:
             return
+        theta, ok_theta = QInputDialog.getDouble(self, "Add Marker", "Theta:",decimals=4)
+        if not ok_theta:
+            return
 
         try:
-            data = {"room": self.room, "id": marker_id, "x": x, "y": y, "z": z}
-            resp = requests.post(f"{self.server_url}/add_marker", json=data, timeout=2)
+            data = {"room": self.room, "id": marker_id, "x": x, "y": y, "z": z, "theta": theta}
+            resp = requests.post(f"{self.server_url}/add_marker", json=data, timeout=4)
             resp.raise_for_status()
             self.load_markers()
         except Exception as e:
@@ -232,7 +236,7 @@ class MarkerManager(QWidget):
             return
         try:
             data = {"room": self.room, "id": marker_id}
-            resp = requests.post(f"{self.server_url}/delete_marker", json=data, timeout=2)
+            resp = requests.post(f"{self.server_url}/delete_marker", json=data, timeout=4)
             resp.raise_for_status()
             self.load_markers()
         except Exception as e:
@@ -259,10 +263,14 @@ class MarkerManager(QWidget):
                                          float(self.marker_table.item(selected, 3).text()),decimals=4)
         if not ok_z:
             return
+        theta, ok_theta = QInputDialog.getDouble(self, "Update Marker", "New Theta:",
+                                         float(self.marker_table.item(selected, 4).text()),decimals=4)
+        if not ok_theta:
+            return
 
         try:
-            data = {"room": self.room, "id": marker_id, "x": x, "y": y, "z": z}
-            resp = requests.post(f"{self.server_url}/update_marker", json=data, timeout=2)
+            data = {"room": self.room, "id": marker_id, "x": x, "y": y, "z": z, "theta": theta}
+            resp = requests.post(f"{self.server_url}/update_marker", json=data, timeout=4)
             resp.raise_for_status()
             self.load_markers()
         except Exception as e:
@@ -334,7 +342,7 @@ class FlaskClientUI(QWidget):
 
     def fetch_position(self):
         try:
-            response = requests.get(f"{self.server_url}/get_position", timeout=2)
+            response = requests.get(f"{self.server_url}/get_position", timeout=4)
             response.raise_for_status()
             data = response.json()
             x, z, y = data.get("x"), data.get("y"), data.get("z")
@@ -346,7 +354,7 @@ class FlaskClientUI(QWidget):
             self.position_label.setText("Coordinates: N/A")
             self.set_status_connected(False)
         try:
-            response = requests.get(f"{self.server_url}/get_aruco_list", timeout=2)
+            response = requests.get(f"{self.server_url}/get_aruco_list", timeout=4)
             response.raise_for_status()
             data = response.json()
             if not isinstance(data, str) :
@@ -375,7 +383,7 @@ class FlaskClientUI(QWidget):
             return
         room = text.strip()
         try:
-            resp = requests.post(f"{self.server_url}/add_room", json={"room": room}, timeout=2)
+            resp = requests.post(f"{self.server_url}/add_room", json={"room": room}, timeout=4)
             resp.raise_for_status()
             self.refresh_rooms()
             self.room_selector.setCurrentText(room)
@@ -390,7 +398,7 @@ class FlaskClientUI(QWidget):
         if confirm != QMessageBox.Yes:
             return
         try:
-            resp = requests.post(f"{self.server_url}/delete_room", json={"room": room}, timeout=2)
+            resp = requests.post(f"{self.server_url}/delete_room", json={"room": room}, timeout=4)
             resp.raise_for_status()
             self.refresh_rooms()
         except Exception as e:

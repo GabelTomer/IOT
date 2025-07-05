@@ -20,9 +20,10 @@ class Marker {
   final String id;
   Offset position;
   double z;
-  Marker({required this.id, required this.position, required this.z});
+  double theta;
+  Marker({required this.id, required this.position, required this.z, required this.theta});
   Map<String, dynamic> toJson() {
-    return {'id': id, 'x': position.dx, 'y': position.dy, 'z': z};
+    return {'id': id, 'x': position.dx, 'y': position.dy, 'z': z, 'theta':theta};
   }
 
   factory Marker.fromJson(Map<String, dynamic> json) {
@@ -30,6 +31,7 @@ class Marker {
       id: json['id'],
       position: Offset(json['x'], json['y']),
       z: json['z'],
+      theta: json['theta']
     );
   }
 }
@@ -143,6 +145,7 @@ class _RobotControl extends State<RobotControl> {
                     (value['y'] as num).toDouble(),
                   ),
                   z: (value['z'] as num).toDouble(),
+                  theta: (value['theta'] as num).toDouble(),
                 );
                 if (int.parse(markerId) > lastKnownMarkerId) {
                   lastKnownMarkerId = int.parse(markerId);
@@ -266,7 +269,7 @@ class _RobotControl extends State<RobotControl> {
     }
   }
 
-  Future<void> addMarker(String id, Offset pos, double z) async {
+  Future<void> addMarker(String id, Offset pos, double z, double theta) async {
     final url = 'http://${widget.ipAddress}:5000/add_marker';
     final response = await http.post(
       Uri.parse(url),
@@ -277,6 +280,8 @@ class _RobotControl extends State<RobotControl> {
         'y': pos.dy,
         'z': z,
         'room': widget.room,
+        'theta': theta,
+        
       }),
     );
     if (response.statusCode == 200) {
@@ -286,7 +291,7 @@ class _RobotControl extends State<RobotControl> {
     }
   }
 
-  Future<void> updateMarker(String id, Offset pos, double z) async {
+  Future<void> updateMarker(String id, Offset pos, double z, double theta) async {
     final url = 'http://${widget.ipAddress}:5000/update_marker';
     final response = await http.post(
       Uri.parse(url),
@@ -297,6 +302,7 @@ class _RobotControl extends State<RobotControl> {
         'y': pos.dy,
         'z': z,
         'room': widget.room,
+        'theta':theta,
       }),
     );
     if (response.statusCode == 200) {
@@ -340,6 +346,7 @@ class _RobotControl extends State<RobotControl> {
       String markerId,
       Offset pos,
       double z,
+      double theta,
     ) {
       final xController = TextEditingController(
         text: pos.dx.toStringAsFixed(2),
@@ -348,7 +355,7 @@ class _RobotControl extends State<RobotControl> {
         text: pos.dy.toStringAsFixed(2),
       );
       final zController = TextEditingController(text: z.toStringAsFixed(2));
-
+      final thetaController = TextEditingController(text: theta.toStringAsFixed(2));
       showDialog(
         context: context,
         builder:
@@ -368,6 +375,10 @@ class _RobotControl extends State<RobotControl> {
                   TextField(
                     controller: zController,
                     decoration: const InputDecoration(labelText: 'Z'),
+                  ),
+                  TextField(
+                    controller: thetaController,
+                    decoration: const InputDecoration(labelText: 'Theta'),
                   ),
                 ],
               ),
@@ -392,12 +403,23 @@ class _RobotControl extends State<RobotControl> {
                     final x = double.tryParse(xController.text);
                     final y = double.tryParse(yController.text);
                     final z = double.tryParse(zController.text);
-                    if (x != null && y != null && z != null) {
-                      await updateMarker(markerId, Offset(x, y), z);
+                    final theta = double.tryParse(thetaController.text);
+                    
+                    if (x != null && y != null && z != null && theta != null && theta > 0 && theta < 360) {
+                      await updateMarker(markerId, Offset(x, y), z, theta);
                       if (mounted) {
                         Navigator.pop(context);
                         fetchKnownMarkers();
                       }
+                    }
+                    else if (theta != null)
+                    {
+                         ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Theta Should be in Degrees Between 0 and 360'),
+                        ),
+                      );
+                      return;
                     }
                   },
                   child: const Text('Update'),
@@ -418,6 +440,7 @@ class _RobotControl extends State<RobotControl> {
         text: initialPos.dy.toStringAsFixed(2),
       );
       final zController = TextEditingController(text: "0.0");
+      final thetaController = TextEditingController(text: "0.0");
 
       showDialog(
         context: context,
@@ -443,6 +466,10 @@ class _RobotControl extends State<RobotControl> {
                     controller: zController,
                     decoration: const InputDecoration(labelText: 'Z'),
                   ),
+                  TextField(
+                    controller: zController,
+                    decoration: const InputDecoration(labelText: 'Theta'),
+                  ),
                 ],
               ),
               actions: [
@@ -456,6 +483,7 @@ class _RobotControl extends State<RobotControl> {
                     final x = double.tryParse(xController.text);
                     final y = double.tryParse(yController.text);
                     final z = double.tryParse(zController.text);
+                    final theta= double.tryParse(thetaController.text);
                     if (id.isNotEmpty && knownMarkers.containsKey(id)) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -480,8 +508,17 @@ class _RobotControl extends State<RobotControl> {
                       );
                       return;
                     }
-                    if (id.isNotEmpty && x != null && y != null && z != null) {
-                      await addMarker(id, Offset(x, y), z);
+                    if(theta != null && (theta < 0 || theta > 360))
+                    {
+                       ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Theta Should Be in Degrees Between 0 and 360'),
+                        ),
+                      );
+                      return;
+                    }
+                    if (id.isNotEmpty && x != null && y != null && z != null && theta != null ) {
+                      await addMarker(id, Offset(x, y), z ,theta);
                       Navigator.pop(context);
                       fetchKnownMarkers(); // Refresh
                     }
@@ -715,6 +752,7 @@ class _RobotControl extends State<RobotControl> {
                                     marker.key,
                                     marker.value.position,
                                     marker.value.z,
+                                    marker.value.theta,
                                   ),
                               child: Icon(
                                 Icons.qr_code_2,
