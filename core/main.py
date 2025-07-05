@@ -49,10 +49,9 @@ elif COMMUNICATION_METHOD == "wifi":
 
 
 # --- GLOBAL Variables and Intialization of 3D Visulaization ---
-combined_aruco_ids = {}
+combined_aruco_ids = set()
 aruco_ids_lock = threading.Lock()
 _gui_available = None
-aruco_list_queue = queue.Queue(maxsize = 5000)
 
 def is_gui_available():
     """
@@ -86,19 +85,13 @@ def plot_updater_thread(aggregator, stop_event, flaskServer = None):
     print("Started plot update thread")
     while not stop_event.is_set():
         # Update global set
-        if combined_aruco_ids:
             with aruco_ids_lock:
-                try:
-                    aruco_list = aruco_list_queue.get_nowait()
-                    for marker in aruco_list:
-                            combined_aruco_ids[str(marker)] =  (combined_aruco_ids[str(marker)] + 1) % 5
-                except queue.Empty:
-                    pass
                 # Call your visual update with all seen markers
                 #update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_ids)
-                flaskServer.updateIds(combined_aruco_ids)
+                flaskServer.updateIds(list(combined_aruco_ids))
+                combined_aruco_ids.clear()
                 
-        time.sleep(0.02)
+            time.sleep(0.02)
 
 def send_command(cmd):
     if not hasattr(send_command, 'last_cmd_time'):
@@ -406,11 +399,6 @@ def main():
     last_tvec = None
     # Main thread displays
     while True:
-
-            if flaskServer.roomChanged:
-                flaskServer.roomChanged = False
-                for key in detector.known_markers.keys():
-                    combined_aruco_ids[str(key)] = 0
             
             ret, frame = video.read()
             if not ret:
@@ -476,8 +464,7 @@ def main():
             # Apply Kalman filter only if measured is valid
             if measured is not None and not np.any(np.isnan(measured)):
                 marker_id = aruco_markers_detected[0]  # Use the first detected marker
-                marker_pose = detector.known_markers.get(str(marker_id), {})
-                theta_deg = marker_pose.get("theta", 0)
+                theta_deg = detector.thetas[str(marker_id)]
                 theta_rad = np.radians(theta_deg)
 
                 R_marker_to_global = np.array([
@@ -499,12 +486,10 @@ def main():
                 pose = aggregator.get_average_pose()
 				
                 aruco_markers_detected = np.array(aruco_markers_detected).flatten().tolist() if aruco_markers_detected is not None else []
-                if aruco_markers_detected and combined_aruco_ids:
-                    try:
-                        aruco_list_queue.put_nowait(aruco_markers_detected)
-                    except queue.Full:
-                        pass  # skip frame if too many pending updates
-                # Camera facing forward = Z-axis; extract forward direction
+                if aruco_markers_detected:
+                    with aruco_ids_lock:
+                        combined_aruco_ids.update(aruco_markers_detected)
+                        
                 if forward_vector is not None:
                     robot_heading = math.atan2(forward_vector[2], forward_vector[0])  # Z, X
                 if pose:

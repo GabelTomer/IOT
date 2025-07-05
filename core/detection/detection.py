@@ -38,16 +38,17 @@ class Detection:
 	        "DICT_APRILTAG_36h11": cv.aruco.DICT_APRILTAG_36h11
         }
 
-        self.known_markers = self.load_known_markers(known_markers_path) if known_markers_path else {}
+        self.thetas, self.known_markers = self.load_known_markers(known_markers_path) if known_markers_path else ({},{})
     
     def update_known_markers(self, room="1"):
-        self.known_markers = self.load_known_markers(self.known_markers_path, room)
+        self.thetas, self.known_markers = self.load_known_markers(self.known_markers_path, room)
     
     
     def load_known_markers(self, path, room="1"):
         with open(path, 'r') as file:
             data = json.load(file)
         
+        thetas = {}
         known_markers = {}
         if room in data:
             data = data[room]
@@ -58,12 +59,13 @@ class Detection:
                 if isinstance(values, dict):
                     # Extract x, y, z from dict
                     known_markers[str(marker)] = np.array([values["x"], values["y"], values["z"]], dtype=np.double)
+                    thetas[str(marker)] = values["theta"]
                 elif isinstance(values, list):
                     # Directly use the list
                     known_markers[str(marker)] = np.array(values, dtype=np.double)
                 else:
                     raise ValueError(f"[ERROR] Invalid marker format for marker {marker}: {values}")
-        return known_markers
+        return thetas, known_markers
 
     def aruco_detect(self, frame, marker_dict="DICT_4X4_50"):
         aruco_dict = cv.aruco.getPredefinedDictionary(self.ARUCO_DICT[marker_dict])
