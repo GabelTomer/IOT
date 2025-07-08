@@ -66,11 +66,10 @@ MAX_LOG_LEN = 500
 RANGE = 0.5  # adjust this for how much space around the center you want
 poses_log = []
 known_markers = {}
-last_markers = None
+
 def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = 'b', marker = 'o'):
-    global known_markers, poses_log, last_markers
+    global known_markers, poses_log
     x, y, z = pose
-    valid_markers = []
     # Keep history for statistics, but don't plot it all
     if len(poses_log) > MAX_LOG_LEN:
         poses_log.pop(0)
@@ -89,16 +88,8 @@ def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = '
     ax.scatter([x], [y], [z], c=color, marker=marker)
 
     # Draw lines from each detected ArUco marker center to the current pose
-    if markers is not None:
-        if last_markers is not None:
-            for key,value in markers.items():
-                if (last_markers[key] - value) % 5 != 0:
-                    valid_markers.append(key)
-        else:
-            valid_markers = [key for key in markers.keys()]
-    
-        last_markers = markers
-        for marker in valid_markers:
+    if markers and markers is not None:
+        for marker in marker:
             if marker == "origin" or marker == "boundry" or marker == "width" or marker == "height":
                     # Skip origin and boundary markers
                     continue
@@ -124,7 +115,25 @@ def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = '
             # Save statistics to CSV
             try:
                 if len(poses_log) > 1:
-                    df.tail(1).to_csv("pose_statistics_log.csv", mode = 'a', header = not os.path.exists("pose_statistics_log.csv"), index = False)
+                    # Compose a dict with all desired fields for the last pose, including pose, mean, and std
+                    last_pose_row = df.tail(1).iloc[0]
+                    csv_row = {
+                        "Pose_X": round(last_pose_row["X"], 4),
+                        "Pose_Y": round(last_pose_row["Y"], 4),
+                        "Pose_Z": round(last_pose_row["Z"], 4),
+                        "Mean_X": round(mean["X"], 4),
+                        "Mean_Y": round(mean["Y"], 4),
+                        "Mean_Z": round(mean["Z"], 4),
+                        "Std_X": round(std["X"], 4),
+                        "Std_Y": round(std["Y"], 4),
+                        "Std_Z": round(std["Z"], 4)
+                    }
+                    pd.DataFrame([csv_row]).to_csv(
+                        "pose_statistics_log.csv",
+                        mode='a',
+                        header=not os.path.exists("pose_statistics_log.csv"),
+                        index=False
+                    )
             
             except Exception as e:
                 print("[Plot Error] Failed to save stats to CSV:", e)
