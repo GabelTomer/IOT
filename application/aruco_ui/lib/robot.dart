@@ -146,9 +146,9 @@ class _RobotControl extends State<RobotControl> {
                   id: markerId,
                   position: Offset(
                     (value['x'] as num).toDouble(),
-                    (value['y'] as num).toDouble(),
+                    (value['z'] as num).toDouble(),
                   ),
-                  z: (value['z'] as num).toDouble(),
+                  z: (value['y'] as num).toDouble(),
                   yaw: (value['yaw'] as num).toDouble(),
                   pitch: (value['pitch'] as num).toDouble(),
                   roll: (value['roll'] as num).toDouble(),
