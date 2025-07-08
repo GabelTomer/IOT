@@ -408,9 +408,10 @@ def main():
             measured = None
             forward_vector = None
             if twoDArray is not None and threeDArray is not None:
-                num_points = len(twoDArray)
-                obj_pts = np.array(threeDArray, dtype=np.float32).reshape(-1, 3)
-                img_pts = np.array(twoDArray, dtype=np.float32).reshape(-1, 2)
+                
+                obj_pts = np.vstack(threeDArray)
+                img_pts = np.vstack(twoDArray)
+                num_points = obj_pts.shape[0]
                 if obj_pts.shape[0] != img_pts.shape[0]:
                     print("[WARN] Mismatched 3D and 2D points.")
                     continue
@@ -463,17 +464,19 @@ def main():
 
             # Apply Kalman filter only if measured is valid
             if measured is not None and not np.any(np.isnan(measured)):
-                marker_id = aruco_markers_detected[0]  # Use the first detected marker
-                theta_deg = detector.thetas[str(marker_id)]
-                theta_rad = np.radians(theta_deg)
 
-                R_marker_to_global = np.array([
-                    [ np.cos(theta_rad), 0, np.sin(theta_rad)],
-                    [ 0,                1, 0                ],
-                    [-np.sin(theta_rad), 0, np.cos(theta_rad)]
-                ])
+                #marker_id = aruco_markers_detected[0]  # Use the first detected marke
+                #theta_deg = detector.thetas[str(marker_id)]
+                #theta_rad = np.radians(theta_deg)
 
-                measured = R_marker_to_global @ measured
+                # R_marker_to_global = np.array([
+                #     [ np.cos(theta_rad), 0, np.sin(theta_rad)],
+                #     [ 0,                1, 0                ],
+                #     [-np.sin(theta_rad), 0, np.cos(theta_rad)]
+                # ])
+
+                # measured = R_marker_to_global @ measured
+
                 
                 kalman.correct(measured)
                 predicted = kalman.predict()

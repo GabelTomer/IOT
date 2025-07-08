@@ -4,6 +4,7 @@ import sys
 import imutils as im
 import json
 import os
+from scipy.spatial.transform import Rotation as R
 
 class Detection:
     def __init__(self, known_markers_path=None):
@@ -38,10 +39,12 @@ class Detection:
 	        "DICT_APRILTAG_36h11": cv.aruco.DICT_APRILTAG_36h11
         }
 
-        self.thetas, self.known_markers = self.load_known_markers(known_markers_path) if known_markers_path else ({},{})
+
+        self.directions, self.known_markers = self.load_known_markers(known_markers_path) if known_markers_path else {}
     
     def update_known_markers(self, room="1"):
-        self.thetas, self.known_markers = self.load_known_markers(self.known_markers_path, room)
+        self.directions, self.known_markers = self.load_known_markers(self.known_markers_path, room)
+
     
     
     def load_known_markers(self, path, room="1"):
@@ -50,6 +53,7 @@ class Detection:
         
         thetas = {}
         known_markers = {}
+        directions = {}
         if room in data:
             data = data[room]
             for  marker, values in data.items():
@@ -59,13 +63,17 @@ class Detection:
                 if isinstance(values, dict):
                     # Extract x, y, z from dict
                     known_markers[str(marker)] = np.array([values["x"], values["y"], values["z"]], dtype=np.double)
-                    thetas[str(marker)] = values["theta"]
+
+                    directions[str(marker)] = np.array([values["yaw"], values["pitch"], values["roll"]], dtype=np.double)
+
                 elif isinstance(values, list):
                     # Directly use the list
                     known_markers[str(marker)] = np.array(values, dtype=np.double)
                 else:
                     raise ValueError(f"[ERROR] Invalid marker format for marker {marker}: {values}")
-        return thetas, known_markers
+
+        return directions, known_markers
+
 
     def aruco_detect(self, frame, marker_dict="DICT_4X4_50"):
         aruco_dict = cv.aruco.getPredefinedDictionary(self.ARUCO_DICT[marker_dict])
@@ -89,17 +97,78 @@ class Detection:
                 center_2d = np.array([cX, cY], dtype=np.double)
                 cv.polylines(frame, [np.int32(corner_points)], True, (0, 255, 0), 2)
                 cv.putText(frame, f"{markerID}", (int(cX) - 15, int(cY) - 15),
-                           cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-
+                           cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)     
                 if str(markerID) in self.known_markers:
                     aruco_markers.append(markerID)
                     marker_center = self.known_markers[str(markerID)]
+                    directions = self.directions[str(markerID)]
+                    all_corners.append(markerCorner.reshape(-1, 2))
+                    all_found_2d.append(markerCorner.reshape(-1, 2))
+                    all_centers_3d.append(get_object_points_from_pose( marker_center,directions[0], directions[1], directions[2]))
 
-                    all_corners.append(markerCorner)
-                    all_found_2d.append(center_2d)
-                    all_centers_3d.append(marker_center)
-
-            return all_corners, np.array(all_found_2d, dtype=np.double), np.array(all_centers_3d, dtype=np.double), frame, aruco_markers
+            return all_corners, all_found_2d, all_centers_3d, frame, aruco_markers
         else:
             return None, None, None, frame, None
 
+
+# def get_object_points(theta_deg, center_point):
+#     theta_rad = np.deg2rad(theta_deg)  # Convert degrees to radians
+#     half = 0.0585 / 2  # Half marker size
+
+#     # Local marker corner offsets relative to center (in marker's own XY/Z plane)
+#     local_offsets = np.array([
+#         [-half, -half],
+#         [ half, -half],
+#         [ half,  half],
+#         [-half,  half]
+#     ])
+
+#     # 2D rotation matrix
+#     R = np.array([
+#         [np.cos(theta_rad), -np.sin(theta_rad)],
+#         [np.sin(theta_rad),  np.cos(theta_rad)]
+#     ])
+
+#     # Apply rotation to each offset
+#     rotated = (R @ local_offsets.T).T  # shape (4, 2)
+
+#     # Insert into full 3D world positions (assume marker lies in a fixed plane)
+#     object_points = np.zeros((4, 3), dtype=np.float32)
+
+#     # You can decide which axis is the marker's plane.
+#     # Let's assume the marker lies in the XZ plane, with Y as up.
+#     for i in range(4):
+#         object_points[i] = [
+#             center_point[0] + rotated[i, 0],  # X
+#             center_point[1],                 # Y stays the same (height)
+#             center_point[2] + rotated[i, 1]  # Z
+#         ]
+
+#     return object_points
+
+def get_object_points_from_pose(center_point, yaw, pitch, roll, marker_size=0.0585):
+    """
+    Compute 3D corner positions of a marker given full orientation.
+    yaw, pitch, roll in degrees
+    """
+    # Define marker corners in local marker frame (centered at origin, lying in XY plane)
+    half = marker_size / 2
+    local_corners = np.array([
+        [-half, -half, 0],  # bottom-left
+        [ half, -half, 0],  # bottom-right
+        [ half,  half, 0],  # top-right
+        [-half,  half, 0]   # top-left
+    ])
+
+    # Convert Euler angles to rotation matrix
+    # You can change the order to match your input convention: here we use ZYX (roll, pitch, yaw)
+    rot = R.from_euler('zyx', [yaw, pitch, roll], degrees=True)
+    R_marker = rot.as_matrix()  # 3x3 rotation matrix
+
+    # Apply rotation to marker corners
+    rotated_corners = (R_marker @ local_corners.T).T  # shape (4, 3)
+
+    # Translate to global position
+    object_points = rotated_corners + np.array(center_point, dtype=np.float32)
+
+    return object_points  # shape (4, 3)
