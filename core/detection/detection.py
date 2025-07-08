@@ -154,15 +154,15 @@ def get_object_points_from_pose(center_point, yaw, pitch, roll, marker_size=0.05
     # Define marker corners in local marker frame (centered at origin, lying in XY plane)
     half = marker_size / 2
     local_corners = np.array([
-        [-half, -half, 0],  # bottom-left
-        [ half, -half, 0],  # bottom-right
-        [ half,  half, 0],  # top-right
-        [-half,  half, 0]   # top-left
+        [-half, half, 0],  # bottom-left
+        [ half, half, 0],  # bottom-right
+        [ half,  -half, 0],  # top-right
+        [-half,  -half, 0]   # top-left
     ])
 
     # Convert Euler angles to rotation matrix
     # You can change the order to match your input convention: here we use ZYX (roll, pitch, yaw)
-    rot = R.from_euler('zyx', [yaw, pitch, roll], degrees=True)
+    rot = R.from_euler('yxz', [yaw, pitch, roll], degrees=True)
     R_marker = rot.as_matrix()  # 3x3 rotation matrix
 
     # Apply rotation to marker corners

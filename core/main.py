@@ -80,8 +80,8 @@ def make_callback(addr):
         ready_flags[addr].set()
     return callback
 
-def plot_updater_thread(aggregator, stop_event, flaskServer = None):
-    global combined_aruco_ids, aruco_list_queue
+def plot_updater_thread(stop_event, flaskServer = None):
+    global combined_aruco_ids
     print("Started plot update thread")
     while not stop_event.is_set():
         # Update global set
@@ -367,7 +367,7 @@ def main():
     aggregator = PoseAggregator()
     stop_event = threading.Event()
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
-    threading.Thread(target=plot_updater_thread, args = (aggregator, stop_event, flaskServer), daemon=True).start()
+    threading.Thread(target=plot_updater_thread, args = (stop_event, flaskServer), daemon=True).start()
     server_thread.start()
     
     if COMMUNICATION_METHOD == "i2c":
