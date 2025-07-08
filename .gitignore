@@ -49,4 +49,4 @@ pose_statistics_log.csv
 *.csv
 
 # known_Markers
-/core/utils/known_markers.json
+*known_markers.json

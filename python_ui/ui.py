@@ -69,7 +69,7 @@ known_markers = {}
 
 def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = 'b', marker = 'o'):
     global known_markers, poses_log
-    x, y, z = pose
+    x, z, y = pose
     # Keep history for statistics, but don't plot it all
     if len(poses_log) > MAX_LOG_LEN:
         poses_log.pop(0)

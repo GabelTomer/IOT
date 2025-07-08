@@ -398,6 +398,7 @@ def main():
             corners, twoDArray, threeDArray, frame, aruco_markers_detected = detector.aruco_detect(frame=frame)
             measured = None
             forward_vector = None
+            R = None
             if twoDArray is not None and threeDArray is not None and twoDArray and threeDArray:
                 
                 obj_pts = np.vstack(threeDArray)
@@ -484,8 +485,9 @@ def main():
                     with aruco_ids_lock:
                         combined_aruco_ids.update(aruco_markers_detected)
                         
-                if forward_vector is not None:
-                    robot_heading = math.atan2(forward_vector[2], forward_vector[0])  # Z, X
+                if R is not None:
+                    forward_vector = R[:, 2]  # Forward vector in camera frame
+                    robot_heading = math.atan2(forward_vector[0], forward_vector[2])  # Z, X
                 if pose:
                     x, y, z = pose
                     # Update server with smoothed average
@@ -507,12 +509,10 @@ def main():
                         flaskServer.target_position = None
                         print("=== Reached Target ===")
                     else:
-                        angle_to_target = math.atan2(dz, dx)
-                        if dz < 0:
-                            heading_error = angle_to_target+math.pi
-                        else:
-                            heading_error = angle_to_target
-                        # heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error)) # Normalize to get the shortets rotation 
+                        angle_to_target = math.atan2(dx, dz)  # Again, atan2(X, Z) for your system
+
+                        heading_error = angle_to_target - robot_heading
+                        heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error))  # Normalize to [-π, π]
                         heading_error = math.degrees(heading_error)
 
                         # Simple steering logic
