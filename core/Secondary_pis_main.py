@@ -10,7 +10,6 @@ import threading
 # --- General GLOBAL Variables --- 
 COMMUNICATION_METHOD = 'wifi'  # ← change to 'WiFi or i2c' when needed
 GENERATE_ARUCO_BOARD = False
-SLAVE_ID = 1
 CAMERA_ROTATION_DEG = 90  # or any angle
 theta = np.radians(CAMERA_ROTATION_DEG)
 POSE_DIFF_THRESHOLD = 0.01  # 1 cm
@@ -28,7 +27,6 @@ if COMMUNICATION_METHOD == "wifi":
     HOST = "192.168.0.100"
     PORT = 6002
     udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    first_time = True
 
 # --- GLOBAL Variables and Import specific Libraries for I2C ---
 elif COMMUNICATION_METHOD == "i2c":
@@ -250,16 +248,12 @@ def kalman_filter_config():
 def send_pose(pose, num_of_aruco, aruco_list):
     global udp_socket, first_time
     x, y, z = pose
-    timestamp = time.time_ns() // 1000
-    if first_time:
-        time_of_slave = timestamp
-        first_time = False
-    
     payload = None
     try:
         header_bytes = ((HEADER >> 16) & 0xFF, (HEADER >> 8) & 0xFF, HEADER & 0xFF)
-        payload_format = f'<BBBB3fQQ{num_of_aruco}B'
-        payload = struct.pack(payload_format, *header_bytes, SLAVE_ID, x, y, z, time_of_slave, timestamp, *aruco_list)
+        timestamp = time.time_ns() // 1000
+        payload_format = f'<BBB3fQ{num_of_aruco}B'
+        payload = struct.pack(payload_format, *header_bytes, x, y, z, timestamp, *aruco_list)
         udp_socket.sendto(payload, (HOST, PORT))
         
     except Exception as e:
