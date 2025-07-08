@@ -13,6 +13,7 @@ GENERATE_ARUCO_BOARD = False
 CAMERA_ROTATION_DEG = 90  # or any angle
 theta = np.radians(CAMERA_ROTATION_DEG)
 POSE_DIFF_THRESHOLD = 0.01  # 1 cm
+
 last_sent_pose = None
 R_to_main = np.array([
     [ np.cos(theta), 0, np.sin(theta)],

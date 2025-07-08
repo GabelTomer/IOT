@@ -88,11 +88,13 @@ def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = '
     ax.scatter([x], [y], [z], c=color, marker=marker)
 
     # Draw lines from each detected ArUco marker center to the current pose
-    if markers and markers is not None:
-        for marker in marker:
-            if marker == "origin" or marker == "boundry" or marker == "width" or marker == "height":
-                    # Skip origin and boundary markers
-                    continue
+    if isinstance(markers, list) and all(isinstance(m, (int, str)) for m in markers):
+        for marker in markers:
+            if str(marker) in ["origin", "boundry", "width", "height"]:
+                continue
+            if str(marker) not in known_markers:
+                continue  # skip unknown markers
+            
             aruco_marker = known_markers[str(marker)]
             cx, cy, cz = aruco_marker.get("x"), aruco_marker.get("y"), aruco_marker.get("z")
             dx, dy, dz = x - cx, y - cy, z - cz
