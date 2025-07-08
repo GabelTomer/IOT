@@ -87,7 +87,7 @@ def plot_updater_thread(stop_event, flaskServer = None):
                 flaskServer.updateIds(list(combined_aruco_ids))
                 combined_aruco_ids.clear()
                 
-            time.sleep(0.02)
+            time.sleep(0.4)
 
 def send_command(cmd):
     if not hasattr(send_command, 'last_cmd_time'):

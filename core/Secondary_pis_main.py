@@ -10,16 +10,7 @@ import threading
 # --- General GLOBAL Variables --- 
 COMMUNICATION_METHOD = 'wifi'  # ← change to 'WiFi or i2c' when needed
 GENERATE_ARUCO_BOARD = False
-CAMERA_ROTATION_DEG = 90  # or any angle
-theta = np.radians(CAMERA_ROTATION_DEG)
 #POSE_DIFF_THRESHOLD = 0.01  # 1 cm
-
-last_sent_pose = None
-R_to_main = np.array([
-    [ np.cos(theta), 0, np.sin(theta)],
-    [ 0,             1, 0            ],
-    [-np.sin(theta), 0, np.cos(theta)]
-])
 
 # --- GLOBAL Variables and Import specific Libraries for WiFi ---
 if COMMUNICATION_METHOD == "wifi":
@@ -391,7 +382,7 @@ def main():
                     aruco_id_list = aruco_id_list[:MAX_ARUCO_LENGTH]
     
                 num_of_aruco_ids = len(aruco_id_list)
-                pose_global = (R_to_main @ filtered_pos).flatten()
+                pose_global = (filtered_pos).flatten()
                 if COMMUNICATION_METHOD == "i2c" and (not data_queue.full()) and (not aruco_detect_queue.full()):
                     counter = (counter + 1) % 256
                     pose = np.array(pose_global, dtype = np.float16).view(np.uint16)
