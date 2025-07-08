@@ -12,7 +12,7 @@ COMMUNICATION_METHOD = 'wifi'  # ← change to 'WiFi or i2c' when needed
 GENERATE_ARUCO_BOARD = False
 CAMERA_ROTATION_DEG = 90  # or any angle
 theta = np.radians(CAMERA_ROTATION_DEG)
-POSE_DIFF_THRESHOLD = 0.01  # 1 cm
+#POSE_DIFF_THRESHOLD = 0.01  # 1 cm
 
 last_sent_pose = None
 R_to_main = np.array([
@@ -72,15 +72,15 @@ def runServer(flaskServer: server):
     flaskServer.setup_routes()
     flaskServer.run()
 
-def should_send_pose(current_pose, last_pose):
-    if last_pose is None:
-        return True
+# def should_send_pose(current_pose, last_pose):
+#     if last_pose is None:
+#         return True
     
-    dx = current_pose[0] - last_pose[0]
-    dy = current_pose[1] - last_pose[1]
-    dz = current_pose[2] - last_pose[2]
-    dist_squared = dx**2 + dy**2 + dz**2
-    return dist_squared >= POSE_DIFF_THRESHOLD**2
+#     dx = current_pose[0] - last_pose[0]
+#     dy = current_pose[1] - last_pose[1]
+#     dz = current_pose[2] - last_pose[2]
+#     dist_squared = dx**2 + dy**2 + dz**2
+#     return dist_squared >= POSE_DIFF_THRESHOLD**2
 
 def decode_bsc_status(status: int):
     return {
@@ -401,9 +401,9 @@ def main():
                     payload_data = struct.pack(f'<BBBBB{num_of_aruco_ids}B', ((HEADER >> 8) & 0xFF),  (HEADER & 0xFF), counter, 0x02, num_of_aruco_ids, *aruco_id_list)
                     aruco_detect_queue.put(payload_data)
                 
-                if should_send_pose(tuple(pose_global), last_sent_pose):
-                    send_pose(tuple(pose_global), num_of_aruco_ids, aruco_id_list)
-                    last_sent_pose = tuple(pose_global)
+                #if should_send_pose(tuple(pose_global), last_sent_pose):
+                send_pose(tuple(pose_global), num_of_aruco_ids, aruco_id_list)
+                    #last_sent_pose = tuple(pose_global)
                     
                 #print Average Camera Position
                 print(f"Filtered Camera Position -> X: {pose_global[0]:.4f}, Y: {pose_global[1]:.4f}, Z: {pose_global[2]:.4f}")
