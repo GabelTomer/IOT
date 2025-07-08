@@ -20,10 +20,12 @@ class Marker {
   final String id;
   Offset position;
   double z;
-  double theta;
-  Marker({required this.id, required this.position, required this.z, required this.theta});
+  double yaw;
+  double pitch;
+  double roll;
+  Marker({required this.id, required this.position, required this.z, required this.yaw, required this.pitch, required this.roll});
   Map<String, dynamic> toJson() {
-    return {'id': id, 'x': position.dx, 'y': position.dy, 'z': z, 'theta':theta};
+    return {'id': id, 'x': position.dx, 'y': position.dy, 'z': z, 'yaw':yaw, 'pitch':pitch, 'roll':roll};
   }
 
   factory Marker.fromJson(Map<String, dynamic> json) {
@@ -31,7 +33,9 @@ class Marker {
       id: json['id'],
       position: Offset(json['x'], json['y']),
       z: json['z'],
-      theta: json['theta']
+      yaw: json['yaw'],
+      pitch: json['pitch'],
+      roll: json['roll'],
     );
   }
 }
@@ -145,7 +149,9 @@ class _RobotControl extends State<RobotControl> {
                     (value['y'] as num).toDouble(),
                   ),
                   z: (value['z'] as num).toDouble(),
-                  theta: (value['theta'] as num).toDouble(),
+                  yaw: (value['yaw'] as num).toDouble(),
+                  pitch: (value['pitch'] as num).toDouble(),
+                  roll: (value['roll'] as num).toDouble(),
                 );
                 if (int.parse(markerId) > lastKnownMarkerId) {
                   lastKnownMarkerId = int.parse(markerId);
@@ -269,7 +275,7 @@ class _RobotControl extends State<RobotControl> {
     }
   }
 
-  Future<void> addMarker(String id, Offset pos, double z, double theta) async {
+  Future<void> addMarker(String id, Offset pos, double z, double yaw, double pitch, double roll) async {
     final url = 'http://${widget.ipAddress}:5000/add_marker';
     final response = await http.post(
       Uri.parse(url),
@@ -280,7 +286,9 @@ class _RobotControl extends State<RobotControl> {
         'y': pos.dy,
         'z': z,
         'room': widget.room,
-        'theta': theta,
+        'yaw': yaw,
+        'pitch': pitch,
+        'roll': roll,
         
       }),
     );
@@ -291,7 +299,7 @@ class _RobotControl extends State<RobotControl> {
     }
   }
 
-  Future<void> updateMarker(String id, Offset pos, double z, double theta) async {
+  Future<void> updateMarker(String id, Offset pos, double z, double yaw, double pitch, double roll) async {
     final url = 'http://${widget.ipAddress}:5000/update_marker';
     final response = await http.post(
       Uri.parse(url),
@@ -302,7 +310,9 @@ class _RobotControl extends State<RobotControl> {
         'y': pos.dy,
         'z': z,
         'room': widget.room,
-        'theta':theta,
+        'yaw':yaw,
+        'pitch':pitch,
+        'roll':roll,
       }),
     );
     if (response.statusCode == 200) {
@@ -346,7 +356,9 @@ class _RobotControl extends State<RobotControl> {
       String markerId,
       Offset pos,
       double z,
-      double theta,
+      double yaw,
+      double pitch,
+      double roll,
     ) {
       final xController = TextEditingController(
         text: pos.dx.toStringAsFixed(2),
@@ -355,7 +367,9 @@ class _RobotControl extends State<RobotControl> {
         text: pos.dy.toStringAsFixed(2),
       );
       final zController = TextEditingController(text: z.toStringAsFixed(2));
-      final thetaController = TextEditingController(text: theta.toStringAsFixed(2));
+      final yawController = TextEditingController(text: yaw.toStringAsFixed(2));
+      final pitchController = TextEditingController(text: pitch.toStringAsFixed(2));
+      final rollController = TextEditingController(text: roll.toStringAsFixed(2));
       showDialog(
         context: context,
         builder:
@@ -377,8 +391,16 @@ class _RobotControl extends State<RobotControl> {
                     decoration: const InputDecoration(labelText: 'Z'),
                   ),
                   TextField(
-                    controller: thetaController,
-                    decoration: const InputDecoration(labelText: 'Theta'),
+                    controller: yawController,
+                    decoration: const InputDecoration(labelText: 'Yaw'),
+                  ),
+                  TextField(
+                    controller: pitchController,
+                    decoration: const InputDecoration(labelText: 'Pitch'),
+                  ),
+                  TextField(
+                    controller: rollController,
+                    decoration: const InputDecoration(labelText: 'Roll'),
                   ),
                 ],
               ),
@@ -403,24 +425,45 @@ class _RobotControl extends State<RobotControl> {
                     final x = double.tryParse(xController.text);
                     final y = double.tryParse(yController.text);
                     final z = double.tryParse(zController.text);
-                    final theta = double.tryParse(thetaController.text);
-                    
-                    if (x != null && y != null && z != null && theta != null && theta > 0 && theta < 360) {
-                      await updateMarker(markerId, Offset(x, y), z, theta);
+                    final yaw = double.tryParse(yawController.text);
+                    final pitch = double.tryParse(pitchController.text);
+                    final roll = double.tryParse(rollController.text);
+                    if(yaw != null && (yaw < -360 || yaw > 360))
+                    {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Yaw Should Be in Degrees Between -360 and 360'),
+                        ),
+                      );
+                      return;
+                    }
+                    if(pitch != null && (pitch < -360 || pitch > 360))
+                    {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Pitch Should Be in Degrees Between -360 and 360'),
+                        ),
+                      );
+                      return;
+                    }
+                    if(roll != null && (roll < -360 || roll > 360))
+                    {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Roll Should Be in Degrees Between -360 and 360'),
+                        ),
+                      );
+                      return;
+                    }
+                    if (x != null && y != null && z != null && yaw != null && pitch != null && roll != null)
+                      {
+                      await updateMarker(markerId, Offset(x, y), z, yaw, pitch, roll);
                       if (mounted) {
                         Navigator.pop(context);
                         fetchKnownMarkers();
                       }
                     }
-                    else if (theta != null)
-                    {
-                         ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Theta Should be in Degrees Between 0 and 360'),
-                        ),
-                      );
-                      return;
-                    }
+                   
                   },
                   child: const Text('Update'),
                 ),
@@ -440,7 +483,9 @@ class _RobotControl extends State<RobotControl> {
         text: initialPos.dy.toStringAsFixed(2),
       );
       final zController = TextEditingController(text: "0.0");
-      final thetaController = TextEditingController(text: "0.0");
+      final yawController = TextEditingController(text: "0.0");
+      final pitchController = TextEditingController(text: "0.0");
+      final rollController = TextEditingController(text: "0.0");
 
       showDialog(
         context: context,
@@ -468,7 +513,15 @@ class _RobotControl extends State<RobotControl> {
                   ),
                   TextField(
                     controller: zController,
-                    decoration: const InputDecoration(labelText: 'Theta'),
+                    decoration: const InputDecoration(labelText: 'Yaw'),
+                  ),
+                  TextField(
+                    controller: zController,
+                    decoration: const InputDecoration(labelText: 'Pitch'),
+                  ),
+                  TextField(
+                    controller: zController,
+                    decoration: const InputDecoration(labelText: 'Roll'),
                   ),
                 ],
               ),
@@ -483,7 +536,9 @@ class _RobotControl extends State<RobotControl> {
                     final x = double.tryParse(xController.text);
                     final y = double.tryParse(yController.text);
                     final z = double.tryParse(zController.text);
-                    final theta= double.tryParse(thetaController.text);
+                    final yaw = double.tryParse(yawController.text);
+                    final pitch = double.tryParse(pitchController.text);
+                    final roll = double.tryParse(rollController.text);
                     if (id.isNotEmpty && knownMarkers.containsKey(id)) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -508,17 +563,35 @@ class _RobotControl extends State<RobotControl> {
                       );
                       return;
                     }
-                    if(theta != null && (theta < 0 || theta > 360))
+                    if(yaw != null && (yaw < -360 || yaw > 360))
                     {
                        ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('Theta Should Be in Degrees Between 0 and 360'),
+                          content: Text('Yaw Should Be in Degrees Between 0 and 360'),
                         ),
                       );
                       return;
                     }
-                    if (id.isNotEmpty && x != null && y != null && z != null && theta != null ) {
-                      await addMarker(id, Offset(x, y), z ,theta);
+                    if(pitch != null && (pitch < -360 || pitch > 360))
+                    {
+                       ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Pitch Should Be in Degrees Between 0 and 360'),
+                        ),
+                      );
+                      return;
+                    }
+                    if(roll != null && (roll < -360 || roll > 360))
+                    {
+                       ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Roll Should Be in Degrees Between 0 and 360'),
+                        ),
+                      );
+                      return;
+                    }
+                    if (id.isNotEmpty && x != null && y != null && z != null && yaw != null && pitch != null && roll != null) {
+                      await addMarker(id, Offset(x, y), z ,yaw, pitch, roll);
                       Navigator.pop(context);
                       fetchKnownMarkers(); // Refresh
                     }
@@ -752,7 +825,9 @@ class _RobotControl extends State<RobotControl> {
                                     marker.key,
                                     marker.value.position,
                                     marker.value.z,
-                                    marker.value.theta,
+                                    marker.value.yaw,
+                                    marker.value.pitch,
+                                    marker.value.roll,
                                   ),
                               child: Icon(
                                 Icons.qr_code_2,
