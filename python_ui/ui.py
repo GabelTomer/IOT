@@ -287,11 +287,11 @@ class MarkerManager(QWidget):
         if not ok_yaw:
             return
         pitch, ok_pitch = QInputDialog.getDouble(self, "Update Marker", "New Pitch:",
-                                         float(self.marker_table.item(selected, 4).text()),decimals=4)
+                                         float(self.marker_table.item(selected, 5).text()),decimals=4)
         if not ok_pitch:
             return
         roll, ok_roll = QInputDialog.getDouble(self, "Update Marker", "New Roll:",
-                                         float(self.marker_table.item(selected, 4).text()),decimals=4)
+                                         float(self.marker_table.item(selected, 6).text()),decimals=4)
         if not ok_roll:
             return
         try:

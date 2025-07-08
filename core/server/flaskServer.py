@@ -346,8 +346,7 @@ class server:
         
     def updateIds(self, arucoList):
         with self.lock:
-            if arucoList:
-                self.arucoList = arucoList
+            self.arucoList = arucoList
 #for debug only use with out raspberry pi
 '''
 def main():
