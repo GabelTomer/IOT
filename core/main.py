@@ -407,7 +407,7 @@ def main():
             corners, twoDArray, threeDArray, frame, aruco_markers_detected = detector.aruco_detect(frame=frame)
             measured = None
             forward_vector = None
-            if twoDArray is not None and threeDArray is not None:
+            if twoDArray is not None and threeDArray is not None and twoDArray and threeDArray:
                 
                 obj_pts = np.vstack(threeDArray)
                 img_pts = np.vstack(twoDArray)
