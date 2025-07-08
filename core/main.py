@@ -204,25 +204,25 @@ def resource_path(relative_path):
 
 def kalman_filter_config():
     # === Kalman Filter Configuration ===
-    kalman = cv2.KalmanFilter(6, 3, 0 , cv2.CV_64F)  # 6 state variables (pos + velocity), 3 measurements (pos only)
+    kalman = cv2.KalmanFilter(3, 3, 0 , cv2.CV_64F)  # 6 state variables (pos + velocity), 3 measurements (pos only)
     # Transition matrix (state update: x = Ax + Bu + w)
-    kalman.transitionMatrix = np.array([
-        [1, 0, 0, 1, 0, 0],  # x
-        [0, 1, 0, 0, 1, 0],  # y
-        [0, 0, 1, 0, 0, 1],  # z
-        [0, 0, 0, 1, 0, 0],  # vx
-        [0, 0, 0, 0, 1, 0],  # vy
-        [0, 0, 0, 0, 0, 1]   # vz
-    ], dtype=np.double)
-
+    kalman.transitionMatrix = np.eye(3, dtype=np.double)  # Identity: x = x
     #Measurement matrix (we only measure position)
-    kalman.measurementMatrix = np.eye(3, 6, dtype=np.double)
-    kalman.processNoiseCov = np.eye(6, dtype=np.double) * 1e-4
+    kalman.measurementMatrix = np.eye(3, dtype=np.double) # observe only see the position (x, y, z), not velocity.”
+    #controls how much random motion you expect in your model.
+	#small value (like 1e-4) means: “I trust my motion model — things don’t move randomly.”
+	#larger value (like 1e-2) would mean: “The world is noisy — objects might move unpredictably.”
+    kalman.processNoiseCov = np.eye(3, dtype=np.double) * 1e-4
+    #It controls how trustworthy the measurements are:
+	#smaller value → “Measurements are precise and accurate.”
+	#A bigger value → “I’m not sure about my measurements (e.g., noisy sensor).”
     kalman.measurementNoiseCov = np.eye(3, dtype=np.double) * 1e-2
-    kalman.errorCovPost = np.eye(6, dtype=np.double)
-    
+    #initial uncertainty in your state estimate. this matrix said how much do I trust my initial guess about position and velocity
+    #Using np.eye(6) means moderately uncertain about both position and velocity at the beginning.
+    #increase this (e.g. 10 * np.eye(6)) to say: really don’t know where I started.
+    kalman.errorCovPost = np.eye(3, dtype=np.double)
     # Initial state (0 position, 0 velocity)
-    kalman.statePost = np.zeros((6, 1), dtype=np.double)
+    kalman.statePost = np.zeros((3, 1), dtype=np.double)
     return kalman
 
 def wifi_listener_and_processor(aggregator, flaskServer, stop_event, port = 6002):
