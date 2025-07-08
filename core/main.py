@@ -238,7 +238,7 @@ def wifi_listener_and_processor(aggregator, flaskServer, stop_event, port = 6002
                 time_now = time.time_ns() // 1000
                 time_diff = (time_now - timestamp)
                 
-                if avg_pose and 0 <= time_diff <= POSE_UPDATE_THRESHOLD:
+                if avg_pose: #and 0 <= time_diff <= POSE_UPDATE_THRESHOLD:
                     x, y, z = avg_pose
                     flaskServer.updatePosition(x, y, z)
                     with aruco_ids_lock:
