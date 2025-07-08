@@ -528,7 +528,7 @@ def main():
             
             else:
                 # print("[ERROR] twoDArray or threeDArray is None!")
-                cmd, cmd_time = send_command("stop")
+                cmd, cmd_time = send_command("rightShort") # Turn around to find markers
                 
             if _gui_available:
                 cv2.imshow("Detection", frame)
