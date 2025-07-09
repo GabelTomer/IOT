@@ -10,6 +10,8 @@ from communication.pose_aggregator import PoseAggregator
 from server.flaskServer import server
 import random
 import json
+
+
 import math
 import select
 
@@ -356,13 +358,16 @@ def main():
 
     detector = Detection(known_markers_path="core/utils/known_markers.json")
 
+
     known_markers = detector.known_markers
     flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector, left_camera_ip="192.168.0.101", right_camera_ip="192.168.0.102")
     aggregator = PoseAggregator()
     stop_event = threading.Event()
+
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     threading.Thread(target=plot_updater_thread, args = (stop_event, flaskServer), daemon=True).start()
     server_thread.start()
+
 
     if COMMUNICATION_METHOD == "i2c":
         for addr, pin in SLAVE_CONFIG.items():
@@ -373,6 +378,7 @@ def main():
     receive_from_clients(COMMUNICATION_METHOD, aggregator, flaskServer, stop_event)
 
     # --- Open Camera for Video Capturing ---
+
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
@@ -501,6 +507,7 @@ def main():
                     # Update server with smoothed average
                     flaskServer.updatePosition(x, y, z, robot_heading)
                     #print Average Camera Position
+
                     print(f"Filtered Camera Position -> X: {x:.2f}, Y height: {y:.2f}, Z depth: {z:.2f}")
 
             current_pos = flaskServer.getPos()
@@ -547,6 +554,7 @@ def main():
 
             if _gui_available:
                 cv2.imshow("Detection", frame)
+
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 stop_event.set()  # <<<<<< Tell all threads to stop

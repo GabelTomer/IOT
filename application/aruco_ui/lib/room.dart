@@ -37,6 +37,7 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+
       _showDefinitionMethodDialog();
     });
   }
@@ -67,6 +68,7 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
           ),
     );
   }
+
 
   void _showInitialRoomDimensionDialog() {
     final widthController = TextEditingController();
@@ -120,6 +122,7 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
           ),
     );
   }
+
 
   void _showCoordinateInputDialog() {
   final List<TextEditingController> xControllers = [];
@@ -288,6 +291,7 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
   );
 }
 
+
   void handleTap(TapUpDetails details) {
     final localPos = details.localPosition;
     setState(() {
@@ -370,9 +374,11 @@ class _RoomCustomizerPageState extends State<RoomCustomizerPage> {
   ) {
     if (canvasSize == null ||
         roomWidthMeters == null ||
+
         roomHeightMeters == null) {
       return;
     }
+
     double maxWidth = 0;
     double maxHeight = 0;
     for (int i = 0; i < points.length; i++) {
@@ -768,13 +774,14 @@ class _RoomSelectorPageState extends State<RoomSelectorPage> {
                       return;
                     }
                     addRoom(newRoom);
-                    
+
                     setState(() {
                       roomNames.add(newRoom);
                     });
                   }
                   Navigator.pop(context);
                   openRoomCustomizer(newRoom);
+
                 },
                 child: Text('Add'),
               ),

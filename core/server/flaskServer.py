@@ -2,8 +2,10 @@ from flask import Flask, jsonify, request
 import json
 import threading
 import time
+
 import requests
 from flask import after_this_request
+
 
 class server:
     def __init__(self,  port = 5000, known_markers_path=None, detector=None, left_camera_ip=None, right_camera_ip=None):
@@ -136,6 +138,7 @@ class server:
                 return response
             return jsonify({"status": "updated", "id": marker_id}), 200
         
+
         def notify_camera_marker_update(camera_ip, marker_id, x, y, z,yaw, pitch, roll):
             if camera_ip is not None:
                 try:
@@ -148,6 +151,7 @@ class server:
                     print(f"[WARN] Failed to notify {camera_ip} marker update: {e}")
         
         
+
         @self.app.route('/change_room_shape', methods=['POST'])
         def change_room_shape():
             data = request.get_json()
@@ -235,6 +239,7 @@ class server:
         @self.app.route('/get_position')
         def get_position():
             dataToSend = self.getPos()
+
             return jsonify(dataToSend)
         
         @self.app.route('/get_aruco_list')
@@ -243,6 +248,7 @@ class server:
             dataToSend = self.getArucoList()
             if dataToSend is None:
                 dataToSend = "GOT NONE"
+
             return jsonify(dataToSend)
         
         @self.app.route('/add_marker', methods=['POST'])

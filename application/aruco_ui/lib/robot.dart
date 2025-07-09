@@ -20,12 +20,14 @@ class Marker {
   final String id;
   Offset position;
   double z;
+
   double yaw;
   double pitch;
   double roll;
   Marker({required this.id, required this.position, required this.z, required this.yaw, required this.pitch, required this.roll});
   Map<String, dynamic> toJson() {
     return {'id': id, 'x': position.dx, 'y': position.dy, 'z': z, 'yaw':yaw, 'pitch':pitch, 'roll':roll};
+
   }
 
   factory Marker.fromJson(Map<String, dynamic> json) {
@@ -36,6 +38,7 @@ class Marker {
       yaw: json['yaw'],
       pitch: json['pitch'],
       roll: json['roll'],
+
     );
   }
 }
@@ -60,6 +63,7 @@ class _RobotControl extends State<RobotControl> {
   String robotPosition = "Fetching...";
   double robotX = 0;
   double robotY = 0;
+
   Offset? targetPositionWorld;
   bool isConnected = false;
   int lastKnownMarkerId = 0;
@@ -79,6 +83,7 @@ class _RobotControl extends State<RobotControl> {
   double robotHeading = 0; // Robot's heading in radians
   String lastCommand = '';
   double commandTime = 0.0;
+
 
 
   Offset pixelToWorld(Offset pixel, Offset origin) {
@@ -112,6 +117,7 @@ class _RobotControl extends State<RobotControl> {
     timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       await fetchRobotPosition();
       await fetchLastCommand();
+
     });
   }
 
@@ -246,6 +252,7 @@ class _RobotControl extends State<RobotControl> {
     }
   }
 
+
   Future<void> fetchLastCommand() async {
     try {
       final response = await http.get(
@@ -276,6 +283,7 @@ class _RobotControl extends State<RobotControl> {
   }
 
   Future<void> addMarker(String id, Offset pos, double z, double yaw, double pitch, double roll) async {
+
     final url = 'http://${widget.ipAddress}:5000/add_marker';
     final response = await http.post(
       Uri.parse(url),
@@ -289,7 +297,7 @@ class _RobotControl extends State<RobotControl> {
         'yaw': yaw,
         'pitch': pitch,
         'roll': roll,
-        
+
       }),
     );
     if (response.statusCode == 200) {
@@ -298,6 +306,7 @@ class _RobotControl extends State<RobotControl> {
       widget.logger.e("Failed to add marker: ${response.statusCode}");
     }
   }
+
 
   Future<void> updateMarker(String id, Offset pos, double z, double yaw, double pitch, double roll) async {
     final url = 'http://${widget.ipAddress}:5000/update_marker';
@@ -463,7 +472,7 @@ class _RobotControl extends State<RobotControl> {
                         fetchKnownMarkers();
                       }
                     }
-                   
+
                   },
                   child: const Text('Update'),
                 ),
@@ -483,9 +492,11 @@ class _RobotControl extends State<RobotControl> {
         text: initialPos.dy.toStringAsFixed(2),
       );
       final zController = TextEditingController(text: "0.0");
+
       final yawController = TextEditingController(text: "0.0");
       final pitchController = TextEditingController(text: "0.0");
       final rollController = TextEditingController(text: "0.0");
+
 
       showDialog(
         context: context,
@@ -511,6 +522,7 @@ class _RobotControl extends State<RobotControl> {
                     controller: zController,
                     decoration: const InputDecoration(labelText: 'Z'),
                   ),
+
                   TextField(
                     controller: zController,
                     decoration: const InputDecoration(labelText: 'Yaw'),
@@ -523,6 +535,7 @@ class _RobotControl extends State<RobotControl> {
                     controller: zController,
                     decoration: const InputDecoration(labelText: 'Roll'),
                   ),
+
                 ],
               ),
               actions: [
@@ -536,9 +549,11 @@ class _RobotControl extends State<RobotControl> {
                     final x = double.tryParse(xController.text);
                     final y = double.tryParse(yController.text);
                     final z = double.tryParse(zController.text);
+
                     final yaw = double.tryParse(yawController.text);
                     final pitch = double.tryParse(pitchController.text);
                     final roll = double.tryParse(rollController.text);
+
                     if (id.isNotEmpty && knownMarkers.containsKey(id)) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -563,6 +578,7 @@ class _RobotControl extends State<RobotControl> {
                       );
                       return;
                     }
+
                     if(yaw != null && (yaw < -360 || yaw > 360))
                     {
                        ScaffoldMessenger.of(context).showSnackBar(
@@ -592,6 +608,7 @@ class _RobotControl extends State<RobotControl> {
                     }
                     if (id.isNotEmpty && x != null && y != null && z != null && yaw != null && pitch != null && roll != null) {
                       await addMarker(id, Offset(x, y), z ,yaw, pitch, roll);
+
                       Navigator.pop(context);
                       fetchKnownMarkers(); // Refresh
                     }
@@ -621,7 +638,9 @@ class _RobotControl extends State<RobotControl> {
 
     Future<void> sendTargetPosition(Offset target) async {
       final url =
+
           'http://${widget.ipAddress}:5000/set_target'; // replace with your endpoint
+
       final response = await http.post(
         Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
@@ -741,9 +760,11 @@ class _RobotControl extends State<RobotControl> {
 
                           if (confirm == true) {
                             final worldPos = screenToWorld(lastTapPosition!);
+
                             setState(() {
                               targetPositionWorld = worldPos; 
                             });
+
                             handleMapTap(worldPos);
                           }
                         },
@@ -779,6 +800,7 @@ class _RobotControl extends State<RobotControl> {
                               origin: roomOrigin,
                               mapWidthMeters: roomWidth,
                               mapHeightMeters: roomHeight,
+
                               //robotPosition: worldToScreen(
                               //Offset(robotX, robotY),
                               //roomOrigin,
@@ -786,6 +808,7 @@ class _RobotControl extends State<RobotControl> {
                               //pixelsPerMeterHeight,
                             //),
                               //robotHeading: robotHeading,
+
                              
                             ),
                           ),
@@ -825,6 +848,7 @@ class _RobotControl extends State<RobotControl> {
                                     marker.key,
                                     marker.value.position,
                                     marker.value.z,
+
                                     marker.value.yaw,
                                     marker.value.pitch,
                                     marker.value.roll,
@@ -833,6 +857,7 @@ class _RobotControl extends State<RobotControl> {
                                 Icons.qr_code_2,
                                 size: markerIconSize.toDouble(),
                                 color: Colors.black,
+
                               ),
                             ),
                           ),
@@ -854,6 +879,7 @@ class _RobotControl extends State<RobotControl> {
                               pixelsPerMeterHeight,
                             ).dy -
                             robotIconSize,
+
                         child: Transform.rotate(
                           angle: robotHeading,
                           child: Icon(
@@ -883,6 +909,7 @@ class _RobotControl extends State<RobotControl> {
                             Icons.location_on,
                             size: markerIconSize.toDouble(),
                             color: Colors.red,
+
                         ),
                       ),
                     ],
@@ -902,7 +929,6 @@ class _RobotControl extends State<RobotControl> {
                   ),
                   const SizedBox(height: 10),
 
-
                   Joystick(
                     mode: JoystickMode.all,
                     listener: (details) {
@@ -919,12 +945,14 @@ class _RobotControl extends State<RobotControl> {
                     robotPosition,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
+
                   const SizedBox(height: 10),
                   Text(
                     'Last Command:  $lastCommand', 
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   
+
                 ],
               ],
             ),
@@ -969,8 +997,10 @@ class RoomPainterMap extends CustomPainter {
   final Offset origin; // in world meters
   final double mapWidthMeters;
   final double mapHeightMeters;
+
   //final Offset robotPosition;
   //final double robotHeading; // in radians
+
  // Adjust based on your scal
 
   RoomPainterMap({
@@ -978,8 +1008,10 @@ class RoomPainterMap extends CustomPainter {
     required this.origin,
     required this.mapWidthMeters,
     required this.mapHeightMeters,
+
     //required this.robotPosition,
     //required this.robotHeading,
+
   });
 
   @override
@@ -990,7 +1022,9 @@ class RoomPainterMap extends CustomPainter {
           ..style = PaintingStyle.fill;
 
     if (boundaryPoints.length < 3) return;
+
     //final double robotIconSize = 30.0; // Size of the robot icon
+
     final path = Path();
     path.moveTo(boundaryPoints[0].dx, boundaryPoints[0].dy);
 
@@ -1008,27 +1042,7 @@ class RoomPainterMap extends CustomPainter {
           ..strokeWidth = 2
           ..style = PaintingStyle.stroke;
     canvas.drawPath(path, border);
-  //   final headingColor =
-  //       Paint()
-  //         ..color = const Color.fromARGB(255, 37, 247, 104)
-  //         ..strokeWidth = 2
-  //         ..style = PaintingStyle.stroke;
-  //   final heading = Path();
-  //  final pos = Offset(
-  //     robotPosition.dx+robotIconSize/2,
-  //     robotPosition.dy-robotIconSize/2,
-  //   );
-  //   final theta = robotHeading - pi / 2; // Adjust heading to point upwards
-  //   heading.moveTo(
-  //     pos.dx,
-  //     pos.dy,
-  //   );
-  //   heading.lineTo(
-  //     pos.dx + 30 * cos(theta),
-  //     pos.dy + 30 * sin(theta),
-  //   );
-  //   heading.close();
-  //   canvas.drawPath(heading, headingColor);
+
   }
 
   @override
