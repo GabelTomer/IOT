@@ -15,20 +15,20 @@ import select
 
 import requests
 import math
-# --- General GLOBAL Variables --- 
+# --- General GLOBAL Variables ---
 POSE_UPDATE_THRESHOLD = 20000.0
 GENERATE_ARUCO_BOARD = False
 COMMUNICATION_METHOD = 'wifi'  # change to 'WiFi or i2c' when needed
 CAR_IP = "192.168.0.104"
-COMMAND_COOLDOWN = 1 # seconds 
-ANGEL_THRESHOLD = 20 # degrees
+COMMAND_COOLDOWN = 3 # seconds
+ANGEL_THRESHOLD = 10 # degrees
 
 
 # --- GLOBAL Variables and Import specific Libraries for I2C ---
 if COMMUNICATION_METHOD == 'i2c':
     import RPi.GPIO as GPIO
     import smbus2
-    
+
     SLAVE_CONFIG = {
     0x08: 18,  # GPIO pin for Pi2 interrupt
     0x09: 19,  # GPIO pin for Pi3 interrupt
@@ -86,24 +86,27 @@ def plot_updater_thread(stop_event, flaskServer = None):
                 #update_pose_visual_and_stats("3D Pose Estimation", pose, aruco_ids)
                 flaskServer.updateIds(list(combined_aruco_ids))
                 combined_aruco_ids.clear()
-                
+
             time.sleep(0.4)
 
 def send_command(cmd):
     if not hasattr(send_command, 'last_cmd_time'):
         send_command.last_cmd_time = 0
     if not hasattr(send_command, 'last_cmd'):
-        send_command.last_cmd = cmd
+        send_command.last_cmd = 'stop'
 
-    if send_command.last_cmd == cmd and not "short" in cmd:
+    if send_command.last_cmd == cmd and not "Short" in cmd:
+        print(f"died in none none not short send_command.last_cmd  = {send_command.last_cmd } cmd = {cmd}")
         return None, None
-    if abs(time.time()-send_command.last_cmd_time) <= COMMAND_COOLDOWN:
+    if abs(time.time()-send_command.last_cmd_time) <= COMMAND_COOLDOWN and send_command.last_cmd == cmd:
+        print(f"died in none none time {abs(time.time()-send_command.last_cmd_time)}")
         return None, None
     url = f"http://{CAR_IP}/{cmd}"
     try:
         response = requests.get(url, timeout=0.5)
         if response.status_code == 200:
             print(f"Sent command: {cmd}")
+            send_command.last_cmd = cmd
             send_command.last_cmd_time = time.time()
             return cmd, send_command.last_cmd_time
         else:
@@ -114,7 +117,7 @@ def send_command(cmd):
         return None, None
 
 def runServer(flaskServer: server):
-    
+
     flaskServer.setup_routes()
     flaskServer.run()
 
@@ -206,12 +209,12 @@ def kalman_filter_config():
     #Measurement matrix (we only measure position)
     kalman.measurementMatrix = np.eye(3, dtype=np.double) # observe only see the position (x, y, z), not velocity.”
     #controls how much random motion you expect in your model.
-	#small value (like 1e-4) means: “I trust my motion model — things don’t move randomly.”
-	#larger value (like 1e-2) would mean: “The world is noisy — objects might move unpredictably.”
+        #small value (like 1e-4) means: “I trust my motion model — things don’t move randomly.”
+        #larger value (like 1e-2) would mean: “The world is noisy — objects might move unpredictably.”
     kalman.processNoiseCov = np.eye(3, dtype=np.double) * 1e-4
     #It controls how trustworthy the measurements are:
-	#smaller value → “Measurements are precise and accurate.”
-	#A bigger value → “I’m not sure about my measurements (e.g., noisy sensor).”
+        #smaller value → “Measurements are precise and accurate.”
+        #A bigger value → “I’m not sure about my measurements (e.g., noisy sensor).”
     kalman.measurementNoiseCov = np.eye(3, dtype=np.double) * 1e-2
     #initial uncertainty in your state estimate. this matrix said how much do I trust my initial guess about position and velocity
     #Using np.eye(6) means moderately uncertain about both position and velocity at the beginning.
@@ -237,23 +240,23 @@ def wifi_listener_and_processor(aggregator, flaskServer, stop_event, port = 6002
                 avg_pose = aggregator.get_average_pose()
                 time_now = time.time_ns() // 1000
                 time_diff = (time_now - timestamp)
-                
+
                 if avg_pose: #and 0 <= time_diff <= POSE_UPDATE_THRESHOLD:
                     x, y, z = avg_pose
                     flaskServer.updatePosition(x, y, z)
                     with aruco_ids_lock:
                         combined_aruco_ids.update(aruco_list)
-        
+
         except Exception as e:
             print(f"[UDP] Error: {e}")
 
 def receive_from_clients(method, aggregator, flaskServer, stop_event):
     if method == 'wifi':
         threading.Thread(target=wifi_listener_and_processor, args=(aggregator, flaskServer, stop_event, PORT), daemon=True).start()
-    
+
     elif method == 'i2c':
         # Use a single I2C bus for all slave addresses
-        i2c_bus = {0x08: smbus2.SMBus(1), 0x09: smbus2.SMBus(3)} 
+        i2c_bus = {0x08: smbus2.SMBus(1), 0x09: smbus2.SMBus(3)}
         bus_map = {addr: i2c_bus for addr in SLAVE_CONFIG.keys()}
         addrs = list(SLAVE_CONFIG.keys())
         buses = [bus_map[addr] for addr in addrs]
@@ -265,7 +268,7 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
     lost_packages = {addr: 0 for addr in addresses}
     packages = {addr: 0 for addr in addresses}
     pose_temp = {}
-    all_connected_slaves = set()    
+    all_connected_slaves = set()
     time_diff = 0.0
     while not stop_event.is_set():
         try:
@@ -276,7 +279,7 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
                     bus.write_byte(addr, 0xA5)
                     all_connected_slaves.add(addr)
                     ready_flags[addr].clear()
-                    
+
                 if ready_flags[addr].is_set():
                     ready_flags[addr].clear()
                     try:
@@ -285,7 +288,7 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
                             packages[addr] += 1
                             print(f"[MASTER addr {hex(addr)}] Received:", bytes(data).hex(), len(data))
                             counter, packet_type = struct.unpack('<BB', bytes(data[2:4]))
-                            
+
                             if packet_type == 0x01:
                                 x, y, z, timestamp = struct.unpack('<3HI', bytes(data[4:14]))
                                 # Convert the 16-bit raw integers back into float16
@@ -296,7 +299,7 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
                                 pose_temp[addr] = {'counter': counter, 'pose': (x, y, z)}
                                 if ((pose_temp[addr]['counter'] - last_counters[addr]) % 256) != 1:
                                     lost_packages[addr] += ((pose_temp[addr]['counter'] - last_counters[addr]) % 256)
-                                
+
                                 last_counters[addr] = pose_temp[addr]['counter']
                                 acc = 100 - ((lost_packages[addr] / packages[addr]) * 100)
                                 print(f"The Accuracy of receiving messages are : {acc}%")
@@ -305,7 +308,7 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
                                 print(f"[MASTER addr {hex(addr)}] Current time      :", now)
                                 time_diff = (now - timestamp) & 0xFFFFFFFF
                                 print(f"[MASTER addr {hex(addr)}] Time diff (μs)    :", time_diff)
-                            
+
                                 if not any(np.isnan(pose_temp[addr]['pose'])) and 0 <= time_diff <= POSE_UPDATE_THRESHOLD:
                                     aggregator.update_pose((x, y, z))
                                     pose = aggregator.get_average_pose()
@@ -313,20 +316,20 @@ def i2c_listener(buses, addresses, aggregator, flaskServer, stop_event):
                                         x, y, z = pose
                                         flaskServer.updatePosition(x, y, z)
                                         print(f"Filtered Camera Position -> X: {x:.2f}, Y: {y:.2f}, Z: {z:.2f}")
-                            
+
                             elif packet_type == 0x02:
                                 if addr in pose_temp and pose_temp[addr]['counter'] == counter:
                                     num_of_detected_aruco = struct.unpack('<B', bytes(data[4:5]))
                                     if num_of_detected_aruco > 0:
                                         aruco_id_list = struct.unpack(f'<{num_of_detected_aruco}B', bytes(data[5:(5 + num_of_detected_aruco)]))
                                         pose = aggregator.get_average_pose()
-                                        
+
                     except Exception as e:
                         print(f"[I2C addr {hex(addr)}] Read error: {e}")
-                        
+
         except Exception as e:
             print(f"[I2C Listener] Fatal error: {e}")
-                   
+
 def main():
     is_gui_available()
     global known_markers
@@ -335,11 +338,11 @@ def main():
         try:
             import random
             generate_aruco_board()
-        
+
         except RuntimeError as e:
             print(f"[ARUCO BOARD ERROR] {e}")
-    
-    # --- Camera Calibration ---   
+
+    # --- Camera Calibration ---
     recalibrate = False
     camera = Camera(gui_available=_gui_available)
 
@@ -350,7 +353,7 @@ def main():
             recalibrate = True
         else:
             print("Retrying calibration. Got error:", mean_error)
-        
+
     detector = Detection(known_markers_path="core/utils/known_markers.json")
 
     known_markers = detector.known_markers
@@ -360,29 +363,33 @@ def main():
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     threading.Thread(target=plot_updater_thread, args = (stop_event, flaskServer), daemon=True).start()
     server_thread.start()
-    
+
     if COMMUNICATION_METHOD == "i2c":
         for addr, pin in SLAVE_CONFIG.items():
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
             ready_flags[addr] = threading.Event()
             GPIO.add_event_detect(pin, GPIO.RISING, callback=make_callback(addr))
-    
+
     receive_from_clients(COMMUNICATION_METHOD, aggregator, flaskServer, stop_event)
-    
+
     # --- Open Camera for Video Capturing ---
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
         sys.exit(1)
-    
+    last_turn_direction = None
     # for navigating:
     REACHED_THRESHOLD = 0.1 # meters
+    smoothed_error =0
+    alpha=0.3
+    smoothed_heading = 0
+    forward_thershold=5
     previous_pos = None
     robot_heading = 0.0
     cmd = None
     cmd_time = None
     # Main thread displays
-    
+
     # === Kalman Filter Configuration ===
     kalman = kalman_filter_config()
     filtered_pos = 0
@@ -390,17 +397,17 @@ def main():
     last_tvec = None
     # Main thread displays
     while True:
-            
+
             ret, frame = video.read()
             if not ret:
                 break
-            
+
             corners, twoDArray, threeDArray, frame, aruco_markers_detected = detector.aruco_detect(frame=frame)
             measured = None
             forward_vector = None
             R = None
             if twoDArray is not None and threeDArray is not None and twoDArray and threeDArray:
-                
+
                 obj_pts = np.vstack(threeDArray)
                 img_pts = np.vstack(twoDArray)
                 num_points = obj_pts.shape[0]
@@ -429,7 +436,7 @@ def main():
                     else:
                         guess_rvec = last_rvec
                         guess_tvec = last_tvec
-                        
+
                     success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs,
                                                     rvec=guess_rvec, tvec=guess_tvec,
                                                     useExtrinsicGuess=True, flags=flags)
@@ -444,9 +451,9 @@ def main():
                         R, _ = cv2.Rodrigues(rvec)
                         pos = -R.T @ tvec.T
                         positions.append(pos)
-                        
+
                     measured = np.mean(positions, axis = 0).astype(np.double).reshape(3, 1)
-                    
+
                 elif num_points == 1:
                     rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, camera.MARKER_LENGTH, camera.camera_matrix, camera.dist_coeffs)
                     rvec = rvecs[0]
@@ -469,7 +476,7 @@ def main():
 
                 # measured = R_marker_to_global @ measured
 
-                
+
                 kalman.correct(measured)
                 predicted = kalman.predict()
                 filtered_pos = predicted[:3]
@@ -479,60 +486,68 @@ def main():
 
                 aggregator.update_pose((filtered_pos[0][0], filtered_pos[1][0], filtered_pos[2][0]))
                 pose = aggregator.get_average_pose()
-				
+
                 aruco_markers_detected = np.array(aruco_markers_detected).flatten().tolist() if aruco_markers_detected is not None else []
                 if aruco_markers_detected:
                     with aruco_ids_lock:
                         combined_aruco_ids.update(aruco_markers_detected)
-                        
+
                 if R is not None:
                     forward_vector = R[:, 2]  # Forward vector in camera frame
-                    robot_heading = math.atan2(forward_vector[0], forward_vector[2])  # Z, X
+                    smoothed_heading = (1-alpha)*smoothed_heading +alpha*math.atan2(forward_vector[0], forward_vector[2])  # Z, X
+                    robot_heading = smoothed_heading
                 if pose:
                     x, y, z = pose
                     # Update server with smoothed average
                     flaskServer.updatePosition(x, y, z, robot_heading)
                     #print Average Camera Position
                     print(f"Filtered Camera Position -> X: {x:.2f}, Y height: {y:.2f}, Z depth: {z:.2f}")
-    
-                current_pos = flaskServer.getPos()
-                target_pos = flaskServer.get_target()
-                if target_pos is not None:
-                    print(f"Target position: {target_pos}")
 
-                    dx = target_pos['x'] - current_pos['x']
-                    dz = target_pos['z'] - current_pos['z']
-                    distance = math.hypot(dx, dz)
-                            
-                    if distance < REACHED_THRESHOLD:
-                        cmd, cmd_time = send_command("stop")
-                        flaskServer.target_position = None
-                        print("=== Reached Target ===")
+            current_pos = flaskServer.getPos()
+            target_pos = flaskServer.get_target()
+            if target_pos is not None:
+                print(f"Target position: {target_pos}")
+
+                dx = target_pos['x'] - current_pos['x']
+                dz = target_pos['z'] - current_pos['z']
+                distance = math.hypot(dx, dz)
+
+                if distance < REACHED_THRESHOLD:
+                    cmd, cmd_time = send_command("stop")
+                    flaskServer.target_position = None
+
+                    print("=== Reached Target ===")
+                else:
+                    angle_to_target = math.atan2(dx, dz)  # Again, atan2(X, Z) for your system
+
+                    raw_error = angle_to_target - robot_heading
+                    raw_error = (raw_error+180)%360 -180 #math.atan2(math.sin(raw_error), math.cos(raw_error))  # Normalize to [-π, π]
+                    raw_error = math.degrees(raw_error)
+                    smoothed_error = (1-alpha)*smoothed_error + alpha*raw_error
+
+                            # Simple steering logic
+                    if abs(smoothed_error) < forward_thershold:
+                        cmd, cmd_time = send_command("forward")
                     else:
-                        angle_to_target = math.atan2(dx, dz)  # Again, atan2(X, Z) for your system
+                        if   smoothed_error > ANGEL_THRESHOLD :
 
-                        heading_error = angle_to_target - robot_heading
-                        heading_error = math.atan2(math.sin(heading_error), math.cos(heading_error))  # Normalize to [-π, π]
-                        heading_error = math.degrees(heading_error)
-
-                        # Simple steering logic
-                        if abs(heading_error) < ANGEL_THRESHOLD:
-                            cmd, cmd_time = send_command("forward")
-                        elif heading_error > ANGEL_THRESHOLD:
                             cmd, cmd_time = send_command("leftShort")
-                        elif heading_error < -ANGEL_THRESHOLD:
+
+                        elif smoothed_error < -ANGEL_THRESHOLD :
+
                             cmd, cmd_time = send_command("rightShort")
 
 
-                    previous_pos = current_pos
-            
-            else:
-                # print("[ERROR] twoDArray or threeDArray is None!")
-                cmd, cmd_time = send_command("rightShort") # Turn around to find markers
-                
+
+                previous_pos = current_pos
+
+            #else:
+                #print("[ERROR] twoDArray or threeDArray is None!")
+                #cmd, cmd_time = send_command("stop") # Turn around to find markers
+
             if _gui_available:
                 cv2.imshow("Detection", frame)
-    
+
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 stop_event.set()  # <<<<<< Tell all threads to stop
                 break

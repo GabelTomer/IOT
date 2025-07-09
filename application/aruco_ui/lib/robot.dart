@@ -73,7 +73,7 @@ class _RobotControl extends State<RobotControl> {
   List<Offset> roomBoundary = [];
   Offset roomOrigin = Offset.zero;
   // Adjust based on your robot's IP
-  final String robotIP = "192.168.1.104";
+  final String robotIP = "192.168.0.104";
   double pixelsPerMeterWidth = 0;
   double pixelsPerMeterHeight = 0;
   double robotHeading = 0; // Robot's heading in radians
