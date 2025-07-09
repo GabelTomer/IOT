@@ -6,7 +6,11 @@ from PySide6.QtWidgets import (
     QTableWidgetItem
 )
 from PySide6.QtCore import Qt, QTimer
-
+import matplotlib.pyplot as plt
+import pandas as pd
+import os
+import matplotlib.patheffects as pe
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
 def is_valid_ip(ip: str) -> bool:
     import re
@@ -31,7 +35,7 @@ def prompt_for_ip():
 
 def get_room_list(server_ip):
     try:
-        response = requests.get(f"http://{server_ip}:5000/get_rooms", timeout=2)
+        response = requests.get(f"http://{server_ip}:5000/get_rooms", timeout=4)
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -51,13 +55,98 @@ def notifyRoomSelection(server_ip, room):
         response = requests.post(
             f"http://{server_ip}:5000/notify_room_selection",
             json={"room": room},
-            timeout=2
+            timeout=4
         )
         if response.status_code != 200:
             QMessageBox.warning(None, "Room Error", f"Server responded: {response.text}")
     except Exception as e:
         QMessageBox.critical(None, "Notification Error", f"Could not notify room selection:\n{e}")
 
+MAX_LOG_LEN = 500
+RANGE = 0.5  # adjust this for how much space around the center you want
+poses_log = []
+known_markers = {}
+
+def update_pose_visual_and_stats(fig, ax ,title, pose, markers = None, color = 'b', marker = 'o'):
+    global known_markers, poses_log
+    x, z, y = pose
+    # Keep history for statistics, but don't plot it all
+    if len(poses_log) > MAX_LOG_LEN:
+        poses_log.pop(0)
+    poses_log.append((x, y, z))
+
+    ax.cla()
+    ax.set_title(title)
+    ax.set_xlim(x - RANGE, x + RANGE)
+    ax.set_ylim(y - RANGE, y + RANGE)
+    ax.set_zlim(z - RANGE, z + RANGE)
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
+    ax.set_zlabel("Z")
+
+    # Plot only the current pose
+    ax.scatter([x], [y], [z], c=color, marker=marker)
+
+    # Draw lines from each detected ArUco marker center to the current pose
+    if isinstance(markers, list) and all(isinstance(m, (int, str)) for m in markers):
+        for marker in markers:
+            if str(marker) in ["origin", "boundry", "width", "height"]:
+                continue
+            if str(marker) not in known_markers:
+                continue  # skip unknown markers
+            
+            aruco_marker = known_markers[str(marker)]
+            cx, cy, cz = aruco_marker.get("x"), aruco_marker.get("y"), aruco_marker.get("z")
+            dx, dy, dz = x - cx, y - cy, z - cz
+            ax.quiver(cx, cy, cz, dx, dy, dz, color = 'r', arrow_length_ratio = 0.05)
+
+    # Overlay statistics
+    try:
+        if len(poses_log) > 1:
+            df = pd.DataFrame(poses_log, columns=["X", "Y", "Z"])
+            mean = df.mean()
+            std = df.std()
+            stats_text = (
+                f"Mean: ({mean['X']:.2f}, {mean['Y']:.2f}, {mean['Z']:.2f})\n"
+                f"Std:  ({std['X']:.2f}, {std['Y']:.2f}, {std['Z']:.2f})"
+            )
+            ax.text2D(0.05, 0.95, stats_text, transform=ax.transAxes, fontsize=8,
+                    verticalalignment ='top', bbox=dict(boxstyle = "round", fc = "w"),
+                    path_effects=[pe.withStroke(linewidth=1, foreground = "black")])
+            
+            # Save statistics to CSV
+            try:
+                if len(poses_log) > 1:
+                    # Compose a dict with all desired fields for the last pose, including pose, mean, and std
+                    last_pose_row = df.tail(1).iloc[0]
+                    csv_row = {
+                        "Pose_X": round(last_pose_row["X"], 4),
+                        "Pose_Y": round(last_pose_row["Y"], 4),
+                        "Pose_Z": round(last_pose_row["Z"], 4),
+                        "Mean_X": round(mean["X"], 4),
+                        "Mean_Y": round(mean["Y"], 4),
+                        "Mean_Z": round(mean["Z"], 4),
+                        "Std_X": round(std["X"], 4),
+                        "Std_Y": round(std["Y"], 4),
+                        "Std_Z": round(std["Z"], 4)
+                    }
+                    pd.DataFrame([csv_row]).to_csv(
+                        "pose_statistics_log.csv",
+                        mode='a',
+                        header=not os.path.exists("pose_statistics_log.csv"),
+                        index=False
+                    )
+            
+            except Exception as e:
+                print("[Plot Error] Failed to save stats to CSV:", e)
+            
+    except Exception as e:
+        print("[Plot Error] Failed to compute stats overlay:", e)
+
+    
+    canvas = fig.canvas
+    if hasattr(canvas, "draw"):
+        canvas.draw()
 
 class MarkerManager(QWidget):
     def __init__(self, server_ip, room):
@@ -71,8 +160,8 @@ class MarkerManager(QWidget):
         self.layout = QVBoxLayout(self)
 
         self.marker_table = QTableWidget()
-        self.marker_table.setColumnCount(4)
-        self.marker_table.setHorizontalHeaderLabels(["ID", "X", "Y", "Z"])
+        self.marker_table.setColumnCount(7)
+        self.marker_table.setHorizontalHeaderLabels(["ID", "X", "Y", "Z","Yaw", "Pitch", "Roll"])
         self.layout.addWidget(self.marker_table)
 
         btn_layout = QHBoxLayout()
@@ -98,18 +187,25 @@ class MarkerManager(QWidget):
         self.load_markers()
 
     def load_markers(self):
+        global known_markers
         try:
-            resp = requests.get(f"{self.server_url}/get_Known_Markers/{self.room}", timeout=2)
+            resp = requests.get(f"{self.server_url}/get_Known_Markers/{self.room}", timeout=4)
             resp.raise_for_status()
             markers = resp.json()  # Expects dict like {"1": {"x":1, "y":1, "z":1}, ...}
-
+            known_markers = markers
             self.marker_table.setRowCount(0)
             for row, (mid, coords) in enumerate(markers.items()):
+                if mid == "origin" or mid == "boundry" or mid == "width" or mid == "height":
+                    # Skip origin and boundary markers
+                    continue
                 self.marker_table.insertRow(row)
                 self.marker_table.setItem(row, 0, QTableWidgetItem(mid))
                 self.marker_table.setItem(row, 1, QTableWidgetItem(str(coords["x"])))
                 self.marker_table.setItem(row, 2, QTableWidgetItem(str(coords["y"])))
                 self.marker_table.setItem(row, 3, QTableWidgetItem(str(coords["z"])))
+                self.marker_table.setItem(row, 4, QTableWidgetItem(str(coords["yaw"])))
+                self.marker_table.setItem(row, 5, QTableWidgetItem(str(coords["pitch"])))
+                self.marker_table.setItem(row, 6, QTableWidgetItem(str(coords["roll"])))
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load markers:\n{e}")
 
@@ -121,19 +217,28 @@ class MarkerManager(QWidget):
             return
         marker_id = marker_id.strip()
 
-        x, ok_x = QInputDialog.getDouble(self, "Add Marker", "X coordinate:")
+        x, ok_x = QInputDialog.getDouble(self, "Add Marker", "X coordinate:",decimals=4)
         if not ok_x:
             return
-        y, ok_y = QInputDialog.getDouble(self, "Add Marker", "Y coordinate:")
+        y, ok_y = QInputDialog.getDouble(self, "Add Marker", "Y coordinate:",decimals=4)
         if not ok_y:
             return
-        z, ok_z = QInputDialog.getDouble(self, "Add Marker", "Z coordinate:")
+        z, ok_z = QInputDialog.getDouble(self, "Add Marker", "Z coordinate:",decimals=4)
         if not ok_z:
+            return
+        yaw, ok_yaw = QInputDialog.getDouble(self, "Add Marker", "Yaw:",decimals=4)
+        if not ok_yaw:
+            return
+        pitch, ok_pitch = QInputDialog.getDouble(self, "Add Marker", "Pitch:",decimals=4)
+        if not ok_pitch:
+            return
+        roll, ok_roll = QInputDialog.getDouble(self, "Add Marker", "Roll:",decimals=4)
+        if not ok_roll:
             return
 
         try:
-            data = {"room": self.room, "id": marker_id, "x": x, "y": y, "z": z}
-            resp = requests.post(f"{self.server_url}/add_marker", json=data, timeout=2)
+            data = {"room": self.room, "id": marker_id, "x": x, "y": y, "z": z, "yaw": yaw, "pitch": pitch, "roll": roll}
+            resp = requests.post(f"{self.server_url}/add_marker", json=data, timeout=4)
             resp.raise_for_status()
             self.load_markers()
         except Exception as e:
@@ -150,7 +255,7 @@ class MarkerManager(QWidget):
             return
         try:
             data = {"room": self.room, "id": marker_id}
-            resp = requests.post(f"{self.server_url}/delete_marker", json=data, timeout=2)
+            resp = requests.post(f"{self.server_url}/delete_marker", json=data, timeout=4)
             resp.raise_for_status()
             self.load_markers()
         except Exception as e:
@@ -166,21 +271,32 @@ class MarkerManager(QWidget):
         marker_id = self.marker_table.item(selected, 0).text()
 
         x, ok_x = QInputDialog.getDouble(self, "Update Marker", "New X coordinate:",
-                                         float(self.marker_table.item(selected, 1).text()))
+                                         float(self.marker_table.item(selected, 1).text()),decimals=4)
         if not ok_x:
             return
         y, ok_y = QInputDialog.getDouble(self, "Update Marker", "New Y coordinate:",
-                                         float(self.marker_table.item(selected, 2).text()))
+                                         float(self.marker_table.item(selected, 2).text()),decimals=4)
         if not ok_y:
             return
         z, ok_z = QInputDialog.getDouble(self, "Update Marker", "New Z coordinate:",
-                                         float(self.marker_table.item(selected, 3).text()))
+                                         float(self.marker_table.item(selected, 3).text()),decimals=4)
         if not ok_z:
             return
-
+        yaw, ok_yaw = QInputDialog.getDouble(self, "Update Marker", "New Yaw:",
+                                         float(self.marker_table.item(selected, 4).text()),decimals=4)
+        if not ok_yaw:
+            return
+        pitch, ok_pitch = QInputDialog.getDouble(self, "Update Marker", "New Pitch:",
+                                         float(self.marker_table.item(selected, 5).text()),decimals=4)
+        if not ok_pitch:
+            return
+        roll, ok_roll = QInputDialog.getDouble(self, "Update Marker", "New Roll:",
+                                         float(self.marker_table.item(selected, 6).text()),decimals=4)
+        if not ok_roll:
+            return
         try:
-            data = {"room": self.room, "id": marker_id, "x": x, "y": y, "z": z}
-            resp = requests.post(f"{self.server_url}/update_marker", json=data, timeout=2)
+            data = {"room": self.room, "id": marker_id, "x": x, "y": y, "z": z, "yaw": yaw, "pitch": pitch, "roll": roll}
+            resp = requests.post(f"{self.server_url}/update_marker", json=data, timeout=4)
             resp.raise_for_status()
             self.load_markers()
         except Exception as e:
@@ -194,8 +310,11 @@ class FlaskClientUI(QWidget):
         self.room = selected_room
         self.server_url = f"http://{server_ip}:5000"
         self.setWindowTitle("Barcode Locolaization Client")
-        self.setFixedSize(500, 400)
-
+        #self.setFixedSize(500, 400)
+        self.fig = plt.figure()
+        self.ax = self.fig.add_subplot(111, projection='3d')
+        self.canvas = FigureCanvas(self.fig)  # create canvas from figure
+        self.canvas.setMinimumHeight(300) 
         self.layout = QVBoxLayout()
 
         self.room_selector = QComboBox()
@@ -225,11 +344,11 @@ class FlaskClientUI(QWidget):
         self.layout.addWidget(self.position_label)
         self.layout.addWidget(self.status_label)
         self.layout.addLayout(btn_layout)
-
+        
         # Add MarkerManager widget below the room controls
         self.marker_manager = MarkerManager(server_ip, selected_room)
         self.layout.addWidget(self.marker_manager)
-
+        self.layout.addWidget(self.canvas)
         self.setLayout(self.layout)
 
         self.setup_timer()
@@ -249,15 +368,26 @@ class FlaskClientUI(QWidget):
 
     def fetch_position(self):
         try:
-            response = requests.get(f"{self.server_url}/get_position", timeout=2)
+            response = requests.get(f"{self.server_url}/get_position", timeout=4)
             response.raise_for_status()
             data = response.json()
-            x, y, z = data.get("x"), data.get("y"), data.get("z")
+            x, z, y = data.get("x"), data.get("y"), data.get("z")
+            pose = (x,y,z)
             self.position_label.setText(f"Coordinates: X={x}, Y={y}, Z={z}")
             self.set_status_connected(True)
+            
         except Exception:
             self.position_label.setText("Coordinates: N/A")
             self.set_status_connected(False)
+        try:
+            response = requests.get(f"{self.server_url}/get_aruco_list", timeout=4)
+            response.raise_for_status()
+            data = response.json()
+            if not isinstance(data, str) :
+                print(f"Aruco List : {data}") 
+                update_pose_visual_and_stats(self.fig, self.ax,"3D Visualization",pose=pose, markers = data)
+        except Exception:
+            print("No Aruco List")
 
     def refresh_rooms(self):
         rooms = get_room_list(self.server_ip)
@@ -279,7 +409,7 @@ class FlaskClientUI(QWidget):
             return
         room = text.strip()
         try:
-            resp = requests.post(f"{self.server_url}/add_room", json={"room": room}, timeout=2)
+            resp = requests.post(f"{self.server_url}/add_room", json={"room": room}, timeout=4)
             resp.raise_for_status()
             self.refresh_rooms()
             self.room_selector.setCurrentText(room)
@@ -294,7 +424,7 @@ class FlaskClientUI(QWidget):
         if confirm != QMessageBox.Yes:
             return
         try:
-            resp = requests.post(f"{self.server_url}/delete_room", json={"room": room}, timeout=2)
+            resp = requests.post(f"{self.server_url}/delete_room", json={"room": room}, timeout=4)
             resp.raise_for_status()
             self.refresh_rooms()
         except Exception as e:

@@ -20,9 +20,14 @@ class Marker {
   final String id;
   Offset position;
   double z;
-  Marker({required this.id, required this.position, required this.z});
+
+  double yaw;
+  double pitch;
+  double roll;
+  Marker({required this.id, required this.position, required this.z, required this.yaw, required this.pitch, required this.roll});
   Map<String, dynamic> toJson() {
-    return {'id': id, 'x': position.dx, 'y': position.dy, 'z': z};
+    return {'id': id, 'x': position.dx, 'y': position.dy, 'z': z, 'yaw':yaw, 'pitch':pitch, 'roll':roll};
+
   }
 
   factory Marker.fromJson(Map<String, dynamic> json) {
@@ -30,6 +35,10 @@ class Marker {
       id: json['id'],
       position: Offset(json['x'], json['y']),
       z: json['z'],
+      yaw: json['yaw'],
+      pitch: json['pitch'],
+      roll: json['roll'],
+
     );
   }
 }
@@ -54,6 +63,8 @@ class _RobotControl extends State<RobotControl> {
   String robotPosition = "Fetching...";
   double robotX = 0;
   double robotY = 0;
+
+  Offset? targetPositionWorld;
   bool isConnected = false;
   int lastKnownMarkerId = 0;
   final int robotIconSize = 30;
@@ -66,9 +77,15 @@ class _RobotControl extends State<RobotControl> {
   List<Offset> roomBoundary = [];
   Offset roomOrigin = Offset.zero;
   // Adjust based on your robot's IP
-  final String robotIP = "192.168.1.104";
+  final String robotIP = "192.168.0.104";
   double pixelsPerMeterWidth = 0;
   double pixelsPerMeterHeight = 0;
+  double robotHeading = 0; // Robot's heading in radians
+  String lastCommand = '';
+  double commandTime = 0.0;
+
+
+
   Offset pixelToWorld(Offset pixel, Offset origin) {
     return Offset(
       (pixel.dx - origin.dx) / pixelsPerMeterWidth,
@@ -99,6 +116,8 @@ class _RobotControl extends State<RobotControl> {
     await fetchKnownMarkers();
     timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
       await fetchRobotPosition();
+      await fetchLastCommand();
+
     });
   }
 
@@ -133,9 +152,12 @@ class _RobotControl extends State<RobotControl> {
                   id: markerId,
                   position: Offset(
                     (value['x'] as num).toDouble(),
-                    (value['y'] as num).toDouble(),
+                    (value['z'] as num).toDouble(),
                   ),
-                  z: (value['z'] as num).toDouble(),
+                  z: (value['y'] as num).toDouble(),
+                  yaw: (value['yaw'] as num).toDouble(),
+                  pitch: (value['pitch'] as num).toDouble(),
+                  roll: (value['roll'] as num).toDouble(),
                 );
                 if (int.parse(markerId) > lastKnownMarkerId) {
                   lastKnownMarkerId = int.parse(markerId);
@@ -202,7 +224,8 @@ class _RobotControl extends State<RobotControl> {
             robotPosition =
                 "X: ${data['x'].toStringAsFixed(2)}, Y: ${data['y'].toStringAsFixed(2)}, Z: ${data['z'].toStringAsFixed(2)}";
             robotX = data['x']; // Scale for display
-            robotY = data['y']; // Scale for display
+            robotY = data['z']; // Scale for display
+            robotHeading = data['heading'] ?? 0.0; // Robot's heading in radians
             isConnected = true;
             errorOccurred = false;
           });
@@ -229,7 +252,38 @@ class _RobotControl extends State<RobotControl> {
     }
   }
 
-  Future<void> addMarker(String id, Offset pos, double z) async {
+
+  Future<void> fetchLastCommand() async {
+    try {
+      final response = await http.get(
+        Uri.parse('http://${widget.ipAddress}:5000/get_last_command'),
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (mounted) {
+          setState(() {
+            lastCommand = data['command'] ?? '';
+            commandTime = data['timestamp']; 
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            widget.logger.e("Command fetch error: ${response.statusCode}");
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          widget.logger.e("Command fetch failed: $e");
+        });
+      }
+    }
+  }
+
+  Future<void> addMarker(String id, Offset pos, double z, double yaw, double pitch, double roll) async {
+
     final url = 'http://${widget.ipAddress}:5000/add_marker';
     final response = await http.post(
       Uri.parse(url),
@@ -240,6 +294,10 @@ class _RobotControl extends State<RobotControl> {
         'y': pos.dy,
         'z': z,
         'room': widget.room,
+        'yaw': yaw,
+        'pitch': pitch,
+        'roll': roll,
+
       }),
     );
     if (response.statusCode == 200) {
@@ -249,7 +307,8 @@ class _RobotControl extends State<RobotControl> {
     }
   }
 
-  Future<void> updateMarker(String id, Offset pos, double z) async {
+
+  Future<void> updateMarker(String id, Offset pos, double z, double yaw, double pitch, double roll) async {
     final url = 'http://${widget.ipAddress}:5000/update_marker';
     final response = await http.post(
       Uri.parse(url),
@@ -260,6 +319,9 @@ class _RobotControl extends State<RobotControl> {
         'y': pos.dy,
         'z': z,
         'room': widget.room,
+        'yaw':yaw,
+        'pitch':pitch,
+        'roll':roll,
       }),
     );
     if (response.statusCode == 200) {
@@ -303,6 +365,9 @@ class _RobotControl extends State<RobotControl> {
       String markerId,
       Offset pos,
       double z,
+      double yaw,
+      double pitch,
+      double roll,
     ) {
       final xController = TextEditingController(
         text: pos.dx.toStringAsFixed(2),
@@ -311,7 +376,9 @@ class _RobotControl extends State<RobotControl> {
         text: pos.dy.toStringAsFixed(2),
       );
       final zController = TextEditingController(text: z.toStringAsFixed(2));
-
+      final yawController = TextEditingController(text: yaw.toStringAsFixed(2));
+      final pitchController = TextEditingController(text: pitch.toStringAsFixed(2));
+      final rollController = TextEditingController(text: roll.toStringAsFixed(2));
       showDialog(
         context: context,
         builder:
@@ -331,6 +398,18 @@ class _RobotControl extends State<RobotControl> {
                   TextField(
                     controller: zController,
                     decoration: const InputDecoration(labelText: 'Z'),
+                  ),
+                  TextField(
+                    controller: yawController,
+                    decoration: const InputDecoration(labelText: 'Yaw'),
+                  ),
+                  TextField(
+                    controller: pitchController,
+                    decoration: const InputDecoration(labelText: 'Pitch'),
+                  ),
+                  TextField(
+                    controller: rollController,
+                    decoration: const InputDecoration(labelText: 'Roll'),
                   ),
                 ],
               ),
@@ -355,13 +434,45 @@ class _RobotControl extends State<RobotControl> {
                     final x = double.tryParse(xController.text);
                     final y = double.tryParse(yController.text);
                     final z = double.tryParse(zController.text);
-                    if (x != null && y != null && z != null) {
-                      await updateMarker(markerId, Offset(x, y), z);
+                    final yaw = double.tryParse(yawController.text);
+                    final pitch = double.tryParse(pitchController.text);
+                    final roll = double.tryParse(rollController.text);
+                    if(yaw != null && (yaw < -360 || yaw > 360))
+                    {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Yaw Should Be in Degrees Between -360 and 360'),
+                        ),
+                      );
+                      return;
+                    }
+                    if(pitch != null && (pitch < -360 || pitch > 360))
+                    {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Pitch Should Be in Degrees Between -360 and 360'),
+                        ),
+                      );
+                      return;
+                    }
+                    if(roll != null && (roll < -360 || roll > 360))
+                    {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Roll Should Be in Degrees Between -360 and 360'),
+                        ),
+                      );
+                      return;
+                    }
+                    if (x != null && y != null && z != null && yaw != null && pitch != null && roll != null)
+                      {
+                      await updateMarker(markerId, Offset(x, y), z, yaw, pitch, roll);
                       if (mounted) {
                         Navigator.pop(context);
                         fetchKnownMarkers();
                       }
                     }
+
                   },
                   child: const Text('Update'),
                 ),
@@ -381,6 +492,11 @@ class _RobotControl extends State<RobotControl> {
         text: initialPos.dy.toStringAsFixed(2),
       );
       final zController = TextEditingController(text: "0.0");
+
+      final yawController = TextEditingController(text: "0.0");
+      final pitchController = TextEditingController(text: "0.0");
+      final rollController = TextEditingController(text: "0.0");
+
 
       showDialog(
         context: context,
@@ -406,6 +522,20 @@ class _RobotControl extends State<RobotControl> {
                     controller: zController,
                     decoration: const InputDecoration(labelText: 'Z'),
                   ),
+
+                  TextField(
+                    controller: zController,
+                    decoration: const InputDecoration(labelText: 'Yaw'),
+                  ),
+                  TextField(
+                    controller: zController,
+                    decoration: const InputDecoration(labelText: 'Pitch'),
+                  ),
+                  TextField(
+                    controller: zController,
+                    decoration: const InputDecoration(labelText: 'Roll'),
+                  ),
+
                 ],
               ),
               actions: [
@@ -419,6 +549,11 @@ class _RobotControl extends State<RobotControl> {
                     final x = double.tryParse(xController.text);
                     final y = double.tryParse(yController.text);
                     final z = double.tryParse(zController.text);
+
+                    final yaw = double.tryParse(yawController.text);
+                    final pitch = double.tryParse(pitchController.text);
+                    final roll = double.tryParse(rollController.text);
+
                     if (id.isNotEmpty && knownMarkers.containsKey(id)) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
@@ -443,8 +578,37 @@ class _RobotControl extends State<RobotControl> {
                       );
                       return;
                     }
-                    if (id.isNotEmpty && x != null && y != null && z != null) {
-                      await addMarker(id, Offset(x, y), z);
+
+                    if(yaw != null && (yaw < -360 || yaw > 360))
+                    {
+                       ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Yaw Should Be in Degrees Between 0 and 360'),
+                        ),
+                      );
+                      return;
+                    }
+                    if(pitch != null && (pitch < -360 || pitch > 360))
+                    {
+                       ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Pitch Should Be in Degrees Between 0 and 360'),
+                        ),
+                      );
+                      return;
+                    }
+                    if(roll != null && (roll < -360 || roll > 360))
+                    {
+                       ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Roll Should Be in Degrees Between 0 and 360'),
+                        ),
+                      );
+                      return;
+                    }
+                    if (id.isNotEmpty && x != null && y != null && z != null && yaw != null && pitch != null && roll != null) {
+                      await addMarker(id, Offset(x, y), z ,yaw, pitch, roll);
+
                       Navigator.pop(context);
                       fetchKnownMarkers(); // Refresh
                     }
@@ -474,7 +638,9 @@ class _RobotControl extends State<RobotControl> {
 
     Future<void> sendTargetPosition(Offset target) async {
       final url =
-          'http://${widget.ipAddress}:5000/update_position'; // replace with your endpoint
+
+          'http://${widget.ipAddress}:5000/set_target'; // replace with your endpoint
+
       final response = await http.post(
         Uri.parse(url),
         headers: {'Content-Type': 'application/json'},
@@ -594,6 +760,11 @@ class _RobotControl extends State<RobotControl> {
 
                           if (confirm == true) {
                             final worldPos = screenToWorld(lastTapPosition!);
+
+                            setState(() {
+                              targetPositionWorld = worldPos; 
+                            });
+
                             handleMapTap(worldPos);
                           }
                         },
@@ -629,6 +800,15 @@ class _RobotControl extends State<RobotControl> {
                               origin: roomOrigin,
                               mapWidthMeters: roomWidth,
                               mapHeightMeters: roomHeight,
+
+                              //robotPosition: worldToScreen(
+                              //Offset(robotX, robotY),
+                              //roomOrigin,
+                              //pixelsPerMeterWidth,
+                              //pixelsPerMeterHeight,
+                            //),
+                              //robotHeading: robotHeading,
+
                              
                             ),
                           ),
@@ -668,11 +848,16 @@ class _RobotControl extends State<RobotControl> {
                                     marker.key,
                                     marker.value.position,
                                     marker.value.z,
+
+                                    marker.value.yaw,
+                                    marker.value.pitch,
+                                    marker.value.roll,
                                   ),
                               child: Icon(
-                                Icons.location_on,
+                                Icons.qr_code_2,
                                 size: markerIconSize.toDouble(),
-                                color: Colors.red,
+                                color: Colors.black,
+
                               ),
                             ),
                           ),
@@ -694,10 +879,37 @@ class _RobotControl extends State<RobotControl> {
                               pixelsPerMeterHeight,
                             ).dy -
                             robotIconSize,
-                        child: Icon(
-                          Icons.android,
+
+                        child: Transform.rotate(
+                          angle: robotHeading,
+                          child: Icon(
+                          Icons.navigation_rounded,
                           size: robotIconSize.toDouble(),
-                          color: Colors.green,
+                          color: Colors.blue,
+                          ),
+                           // Use the robot's heading
+                        ),
+                      ),
+                      // destination position
+                      if (targetPositionWorld != null)
+                        Positioned(
+                          left: worldToScreen(
+                            targetPositionWorld!,
+                            roomOrigin,
+                            pixelsPerMeterWidth,
+                            pixelsPerMeterHeight,
+                          ).dx - markerIconSize / 2, // center the icon
+                          top: worldToScreen(
+                            targetPositionWorld!,
+                            roomOrigin,
+                            pixelsPerMeterWidth,
+                            pixelsPerMeterHeight,
+                          ).dy - markerIconSize,
+                          child: Icon(
+                            Icons.location_on,
+                            size: markerIconSize.toDouble(),
+                            color: Colors.red,
+
                         ),
                       ),
                     ],
@@ -733,6 +945,14 @@ class _RobotControl extends State<RobotControl> {
                     robotPosition,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
+
+                  const SizedBox(height: 10),
+                  Text(
+                    'Last Command:  $lastCommand', 
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  
+
                 ],
               ],
             ),
@@ -777,6 +997,10 @@ class RoomPainterMap extends CustomPainter {
   final Offset origin; // in world meters
   final double mapWidthMeters;
   final double mapHeightMeters;
+
+  //final Offset robotPosition;
+  //final double robotHeading; // in radians
+
  // Adjust based on your scal
 
   RoomPainterMap({
@@ -784,6 +1008,9 @@ class RoomPainterMap extends CustomPainter {
     required this.origin,
     required this.mapWidthMeters,
     required this.mapHeightMeters,
+
+    //required this.robotPosition,
+    //required this.robotHeading,
 
   });
 
@@ -795,6 +1022,8 @@ class RoomPainterMap extends CustomPainter {
           ..style = PaintingStyle.fill;
 
     if (boundaryPoints.length < 3) return;
+
+    //final double robotIconSize = 30.0; // Size of the robot icon
 
     final path = Path();
     path.moveTo(boundaryPoints[0].dx, boundaryPoints[0].dy);
@@ -813,6 +1042,7 @@ class RoomPainterMap extends CustomPainter {
           ..strokeWidth = 2
           ..style = PaintingStyle.stroke;
     canvas.drawPath(path, border);
+
   }
 
   @override

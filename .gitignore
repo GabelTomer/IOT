@@ -1,35 +1,52 @@
-cvenv/Lib/site-packages/_distutils_hack/__init__.py
-/cvenv
-/application/aruco_ui/.dart_tool
-/application/aruco_ui/.idea
-/application/aruco_ui/android
-/application/aruco_ui/build
-/application/aruco_ui/ios
-/application/aruco_ui/linux
-/application/aruco_ui/macos
-/application/aruco_ui/windows
-/core/utils/aruco_data
+# Virtual environments
+/venv/
+/cvenv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# macOS system files
+.DS_Store
+
+# Build artifacts
+/build/
+/core/build/
+/core/dist/
+/application/aruco_ui/build/
+/application/aruco_ui/linux/
+/application/aruco_ui/windows/
+/application/aruco_ui/macos/
+/application/aruco_ui/ios/
+/application/aruco_ui/android/
+/application/aruco_ui/.dart_tool/
+
+# Flutter/.dart related
+/application/aruco_ui/.idea/
+/application/aruco_ui/.metadata
+/application/aruco_ui/pubspec.lock
+
+# PyInstaller and spec files
+*.spec
+*.toc
+
+# ArUco and calibration data
+core/utils/aruco_data/
+core/utils/known_markers.json
 charuco_board.png
 charuco_calibration.npz
-charuco_board.png
-core/detection/__pycache__/detection.cpython-311.pyc
-/core/detection/__pycache__
-/core/detection/__pycache__
-/core/detection/__pycache__
-/core/detection/__pycache__
-/core/server/__pycache__
-application/aruco_ui/.metadata
-application/aruco_ui/pubspec.lock
-application/aruco_ui/pubspec.lock
-/core/build
-/core/__pycache__
-/core/detection/__pycache__
-/core/dist
-core/main.spec
-/core/server/__pycache__
-/core/utils/__pycache__
+
+# Service and install scripts
 service/service_installer.sh
-core/utils/known_markers.json
-build/ui/Analysis-00.toc
-/build
-ui.spec
+
+# Python server-side cache
+/core/communication/__pycache__/
+/core/detection/__pycache__/
+/core/server/__pycache__/
+/core/__pycache__/
+/core/utils/__pycache__/
+pose_statistics_log.csv
+*.csv
+
+# known_Markers
+*known_markers.json
