@@ -10,8 +10,6 @@ from communication.pose_aggregator import PoseAggregator
 from server.flaskServer import server
 import random
 import json
-
-
 import math
 import select
 
@@ -358,16 +356,13 @@ def main():
 
     detector = Detection(known_markers_path="core/utils/known_markers.json")
 
-
     known_markers = detector.known_markers
     flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector, left_camera_ip="192.168.0.101", right_camera_ip="192.168.0.102")
     aggregator = PoseAggregator()
     stop_event = threading.Event()
-
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     threading.Thread(target=plot_updater_thread, args = (stop_event, flaskServer), daemon=True).start()
     server_thread.start()
-
 
     if COMMUNICATION_METHOD == "i2c":
         for addr, pin in SLAVE_CONFIG.items():
@@ -378,7 +373,6 @@ def main():
     receive_from_clients(COMMUNICATION_METHOD, aggregator, flaskServer, stop_event)
 
     # --- Open Camera for Video Capturing ---
-
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
@@ -401,6 +395,7 @@ def main():
     filtered_pos = 0
     last_rvec = None
     last_tvec = None
+    
     # Main thread displays
     while True:
 
@@ -499,15 +494,14 @@ def main():
                         combined_aruco_ids.update(aruco_markers_detected)
 
                 if R is not None:
-                    forward_vector = R[:, 2]  # Forward vector in camera frame
-                    smoothed_heading = (1-alpha)*smoothed_heading +alpha*math.atan2(forward_vector[0], forward_vector[2])  # Z, X
+                    forward_vector = R[:, 2] # Forward vector in camera frame
+                    smoothed_heading = (1-alpha)*smoothed_heading +alpha*math.atan2(forward_vector[0], forward_vector[2])  # X, Z to calc the angle from the Z-axis
                     robot_heading = smoothed_heading
                 if pose:
                     x, y, z = pose
                     # Update server with smoothed average
                     flaskServer.updatePosition(x, y, z, robot_heading)
                     #print Average Camera Position
-
                     print(f"Filtered Camera Position -> X: {x:.2f}, Y height: {y:.2f}, Z depth: {z:.2f}")
 
             current_pos = flaskServer.getPos()
@@ -517,7 +511,7 @@ def main():
 
                 dx = target_pos['x'] - current_pos['x']
                 dz = target_pos['z'] - current_pos['z']
-                distance = math.hypot(dx, dz)
+                distance = math.hypot(dz, dx)
 
                 if distance < REACHED_THRESHOLD:
                     cmd, cmd_time = send_command("stop")
@@ -525,25 +519,22 @@ def main():
 
                     print("=== Reached Target ===")
                 else:
-                    angle_to_target = math.atan2(dx, dz)  # Again, atan2(X, Z) for your system
+                    angle_to_target = math.atan2(dx, dz)  # atan2(X, Z) for angle from Z-axis
 
                     raw_error = angle_to_target - robot_heading
-                    raw_error = (raw_error+180)%360 -180 #math.atan2(math.sin(raw_error), math.cos(raw_error))  # Normalize to [-π, π]
+                    # raw_error = (raw_error+180)%360 -180
+                    raw_error = math.atan2(math.sin(raw_error), math.cos(raw_error))  # Normalize to [-π, π]
                     raw_error = math.degrees(raw_error)
                     smoothed_error = (1-alpha)*smoothed_error + alpha*raw_error
-
+                    print(f"x: {x},    y: {y},    z: {z},    heading: {math.degrees(robot_heading)},    smoothed error: {smoothed_error}")
                             # Simple steering logic
                     if abs(smoothed_error) < forward_thershold:
                         cmd, cmd_time = send_command("forward")
                     else:
                         if   smoothed_error > ANGEL_THRESHOLD :
-
                             cmd, cmd_time = send_command("leftShort")
-
                         elif smoothed_error < -ANGEL_THRESHOLD :
-
-                            cmd, cmd_time = send_command("rightShort")
-
+                            cmd, cmd_time = send_command("rightShort")                
 
 
                 previous_pos = current_pos
@@ -554,7 +545,6 @@ def main():
 
             if _gui_available:
                 cv2.imshow("Detection", frame)
-
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 stop_event.set()  # <<<<<< Tell all threads to stop
