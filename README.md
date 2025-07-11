@@ -14,24 +14,44 @@ set navigation goals, enabling the system to autonomously command the
 car to its target.​
 
 ## Folder description :
+```text
 IOT/
 ├── app/                # Flutter mobile app
-├── server/             # Flask API server (runs on master Pi)
-├── main.py             # Entry point for detection and communication
-├── detection.py        # ArUco marker detection and pose logic
-├── communication/      # UDP communication interfaces
-├── utils/              # Kalman filter, camera tools, helpers
-└── calibration/        # Intrinsic camera calibration files
+│
+├── core/               # Detection and communication
+│   ├── server/         # Flask API server
+│   ├── communication/  # Communication related code
+│   ├── detection/      # Markers detection related code
+│   ├── utils/          # Camera tools, helpers
+│
+├── Car/                # RC Car
+│
+├── python_ui/          # Python UI
+│
+├── Unit Tests/         # HW and server tests
+│
+├── Documantation/      # Project documantation
+```
 
+## Hardware Used
 
-## ESP32 SDK version used in this project: 
+| Component              | Quantity |
+|------------------------|----------|
+| Raspberry Pi Zero 2 W  | 3        |
+| JT-Zero V2.0 Camera    | 3        |
+| ESP32 DevKit           | 1        |
+| RC Car Frame + Motors  | 1        |
+| Power Bank             | 3        |
 
-## Arduino/ESP32 libraries used in this project:
+## Library Versions:
+- OpenCV: 4.5.5.62
+- Numpy: 1.24.2
+- Flask: 3.1.0
+- PySide: 6.9.0
 
-
-## Connection diagram:
 
 ## Project Poster:
- 
+ ![poster](.Documentation/IOT_Poster_Barcode_Localization.pdf)
+
 This project is part of ICST - The Interdisciplinary Center for Smart Technologies, Taub Faculty of Computer Science, Technion
 https://icst.cs.technion.ac.il/
