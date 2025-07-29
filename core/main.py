@@ -10,8 +10,6 @@ from communication.pose_aggregator import PoseAggregator
 from server.flaskServer import server
 import random
 import json
-
-
 import math
 import select
 
@@ -22,8 +20,8 @@ POSE_UPDATE_THRESHOLD = 20000.0
 GENERATE_ARUCO_BOARD = False
 COMMUNICATION_METHOD = 'wifi'  # change to 'WiFi or i2c' when needed
 CAR_IP = "192.168.0.104"
-COMMAND_COOLDOWN = 3 # seconds
-ANGEL_THRESHOLD = 10 # degrees
+COMMAND_COOLDOWN = 2 # seconds
+ANGEL_THRESHOLD = 5 # degrees
 
 
 # --- GLOBAL Variables and Import specific Libraries for I2C ---
@@ -50,6 +48,17 @@ elif COMMUNICATION_METHOD == "wifi":
 combined_aruco_ids = set()
 aruco_ids_lock = threading.Lock()
 _gui_available = None
+
+def smooth_angle(prev, new, alpha):
+    delta = (new - prev + math.pi) % (2 * math.pi) - math.pi
+    return prev + alpha * delta
+
+def normolize_angle(angle):
+    while angle > math.pi:
+        angle -= 2*math.pi
+    while angle < -math.pi:
+        angle += 2*math.pi
+    return angle
 
 def is_gui_available():
     """
@@ -245,7 +254,7 @@ def wifi_listener_and_processor(aggregator, flaskServer, stop_event, port = 6002
 
                 if avg_pose: #and 0 <= time_diff <= POSE_UPDATE_THRESHOLD:
                     x, y, z = avg_pose
-                    flaskServer.updatePosition(x, y, z)
+                    flaskServer.updatePosition(x, y, z, flaskServer.position['heading'])
                     with aruco_ids_lock:
                         combined_aruco_ids.update(aruco_list)
 
@@ -358,16 +367,13 @@ def main():
 
     detector = Detection(known_markers_path="core/utils/known_markers.json")
 
-
     known_markers = detector.known_markers
     flaskServer = server(port = 5000, known_markers_path="core/utils/known_markers.json", detector=detector, left_camera_ip="192.168.0.101", right_camera_ip="192.168.0.102")
     aggregator = PoseAggregator()
     stop_event = threading.Event()
-
     server_thread = threading.Thread(target=runServer, args=(flaskServer,))
     threading.Thread(target=plot_updater_thread, args = (stop_event, flaskServer), daemon=True).start()
     server_thread.start()
-
 
     if COMMUNICATION_METHOD == "i2c":
         for addr, pin in SLAVE_CONFIG.items():
@@ -378,18 +384,20 @@ def main():
     receive_from_clients(COMMUNICATION_METHOD, aggregator, flaskServer, stop_event)
 
     # --- Open Camera for Video Capturing ---
-
     video = cv2.VideoCapture(0)
     if not video.isOpened():
         print("Error: Could not Open Video")
         sys.exit(1)
+    # sleep(10) # Debugging 
+
     last_turn_direction = None
     # for navigating:
-    REACHED_THRESHOLD = 0.1 # meters
+    REACHED_THRESHOLD = 0.2 # meters
     smoothed_error =0
     alpha=0.3
+    last_comand=None
     smoothed_heading = 0
-    forward_thershold=5
+    forward_thershold=2
     previous_pos = None
     robot_heading = 0.0
     cmd = None
@@ -401,13 +409,16 @@ def main():
     filtered_pos = 0
     last_rvec = None
     last_tvec = None
+    
     # Main thread displays
     while True:
 
             ret, frame = video.read()
             if not ret:
                 break
-
+            if flaskServer.roomChanged:
+               flaskServer.roomChanged = False
+               last_comand = None
             corners, twoDArray, threeDArray, frame, aruco_markers_detected = detector.aruco_detect(frame=frame)
             measured = None
             forward_vector = None
@@ -422,17 +433,17 @@ def main():
                     continue
 
                 if num_points >= 4:
-                    #flags = cv2.SOLVEPNP_ITERATIVE
-                    #success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags=flags)
-                    # if success:
-                    #     R, _ = cv2.Rodrigues(rvec)
-                    #     measured = (-R.T @ tvec).astype(np.float32).reshape(3, 1)
-                    success, rvec, tvec, inliners = cv2.solvePnPRansac(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs)
-                    if success and inliners is not None and len(inliners) >= 4:
-                        last_rvec = rvec
-                        last_tvec = tvec
+                    flags = cv2.SOLVEPNP_ITERATIVE
+                    success, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs, flags=flags)
+                    if success:
                         R, _ = cv2.Rodrigues(rvec)
                         measured = (-R.T @ tvec).astype(np.double).reshape(3, 1)
+                   # success, rvec, tvec, inliners = cv2.solvePnPRansac(obj_pts, img_pts, camera.camera_matrix, camera.dist_coeffs)
+                   # if success and inliners is not None and len(inliners) >= 4:
+                        last_rvec = rvec
+                        last_tvec = tvec
+                    #    R, _ = cv2.Rodrigues(rvec)
+                     #   measured = (-R.T @ tvec).astype(np.double).reshape(3, 1)
 
                 elif num_points == 3:
                     flags = cv2.SOLVEPNP_ITERATIVE
@@ -499,17 +510,27 @@ def main():
                         combined_aruco_ids.update(aruco_markers_detected)
 
                 if R is not None:
-                    forward_vector = R[:, 2]  # Forward vector in camera frame
-                    smoothed_heading = (1-alpha)*smoothed_heading +alpha*math.atan2(forward_vector[0], forward_vector[2])  # Z, X
-                    robot_heading = smoothed_heading
+                    #forward_vector = R[:, 2] # Forward vector in camera frame
+                    forward_matrix = R.T
+                    #smoothed_heading = (1-alpha)*smoothed_heading +alpha*math.atan2(forward_vector[0], forward_vector[2])  # X, Z to calc the angle from the Z-axis
+                    new_heading = math.atan2(forward_matrix[0,2], forward_matrix[2,2])
+                    #if forward_vector[0] < 0:
+                     #  new_heading += math.pi
+                   # new_heading = normolize_angle(new_heading)
+                    print(f"new_heading: {new_heading}")
+                    smoothed_heading = smooth_angle(smoothed_heading, new_heading, alpha)
+                    robot_heading = normolize_angle(smoothed_heading)
+                    #robot_heading = smoothed_heading
+                    print(f"robot_heading: {robot_heading}")
                 if pose:
                     x, y, z = pose
                     # Update server with smoothed average
                     flaskServer.updatePosition(x, y, z, robot_heading)
                     #print Average Camera Position
-
                     print(f"Filtered Camera Position -> X: {x:.2f}, Y height: {y:.2f}, Z depth: {z:.2f}")
-
+            elif last_comand is not None and last_comand == "forward":
+                cmd, cmd_time = send_command("stop")
+               # last_comand = None 
             current_pos = flaskServer.getPos()
             target_pos = flaskServer.get_target()
             if target_pos is not None:
@@ -517,44 +538,54 @@ def main():
 
                 dx = target_pos['x'] - current_pos['x']
                 dz = target_pos['z'] - current_pos['z']
-                distance = math.hypot(dx, dz)
+                distance = math.hypot(dz, dx)
 
                 if distance < REACHED_THRESHOLD:
                     cmd, cmd_time = send_command("stop")
                     flaskServer.target_position = None
-
+                    last_comand = None
                     print("=== Reached Target ===")
                 else:
-                    angle_to_target = math.atan2(dx, dz)  # Again, atan2(X, Z) for your system
-
+                    angle_to_target = math.atan2(dx,dz)  # atan2(X, Z) for angle from Z-axis
+                    #if dz < 0:
+                    #   angle_to_target += math.pi
+                    print(f"angle_to_target: {angle_to_target}")
                     raw_error = angle_to_target - robot_heading
-                    raw_error = (raw_error+180)%360 -180 #math.atan2(math.sin(raw_error), math.cos(raw_error))  # Normalize to [-π, π]
-                    raw_error = math.degrees(raw_error)
-                    smoothed_error = (1-alpha)*smoothed_error + alpha*raw_error
-
+                    raw_error = normolize_angle(raw_error)
+                   # raw_error = (raw_error+math.pi)%(2*math.pi) -math.pi 
+                    #raw_error = math.atan2(math.sin(raw_error), math.cos(raw_error))  # Normalize to [-π, π]
+                    #smoothed_error = smooth_angle(smoothed_error, raw_error, alpha)
+                    smoothed_error = raw_error
+                    smoothed_error = math.degrees(smoothed_error)
+                    #smoothed_error = (1smoothed_error-alpha)*smoothed_error + alpha*raw_error
+                    print(f"x: {round(x,2)},    y: {round(y,2)},    z: {round(z,2)},    heading: {math.degrees(robot_heading)},    smoothed error: {smoothed_error}")
                             # Simple steering logic
-                    if abs(smoothed_error) < forward_thershold:
-                        cmd, cmd_time = send_command("forward")
-                    else:
-                        if   smoothed_error > ANGEL_THRESHOLD :
-
-                            cmd, cmd_time = send_command("leftShort")
-
-                        elif smoothed_error < -ANGEL_THRESHOLD :
-
-                            cmd, cmd_time = send_command("rightShort")
-
-
+                    if last_comand is None or (last_comand is not None and  last_comand != "forward"):
+                        if abs(smoothed_error) < forward_thershold:
+                            cmd, cmd_time = send_command("forward")
+                            last_comand = "forward"
+                            print("print choose forward")
+                        else:
+                            if   smoothed_error > ANGEL_THRESHOLD :
+                                print("print choose left")
+                                last_comand="left"
+                                cmd, cmd_time = send_command("leftShort")
+                            
+                            elif smoothed_error < -ANGEL_THRESHOLD :
+                                last_comand = "right"
+                                cmd, cmd_time = send_command("rightShort")
+                                print("print choose right")
+                    print("finished if")
 
                 previous_pos = current_pos
 
-            #else:
+            else:
+                last_comand = None
                 #print("[ERROR] twoDArray or threeDArray is None!")
                 #cmd, cmd_time = send_command("stop") # Turn around to find markers
 
             if _gui_available:
                 cv2.imshow("Detection", frame)
-
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 stop_event.set()  # <<<<<< Tell all threads to stop
